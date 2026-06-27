@@ -148,6 +148,109 @@ function parseWarmupSets(value: string | number | undefined): number {
   return 0;
 }
 
+function isCsvFile(fileName: string, buffer: Buffer): boolean {
+  if (fileName.toLowerCase().endsWith('.csv')) return true;
+  const head = buffer.slice(0, 200).toString('utf-8');
+  return head.includes('block,') && head.includes('exercise,');
+}
+
+function parseCsvProgram(workbook: XLSX.WorkBook, programName?: string): ParsedProgram {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet) as Record<string, string | number>[];
+
+  const program: ParsedProgram = {
+    name: programName || 'Imported Program',
+    frequencyPerWeek: 0,
+    source: 'CSV Import',
+    blocks: [],
+  };
+
+  const blockMap = new Map<number, ParsedBlock>();
+  const daySet = new Set<string>();
+
+  for (const row of rows) {
+    const blockNum = Number(row['block']);
+    const day = String(row['day'] || '');
+    const dayName = String(row['day_name'] || '');
+    const exerciseName = String(row['exercise'] || '').trim();
+    const sets = Number(row['sets']) || 2;
+    const repLowRaw = String(row['rep_low'] || '');
+    const repHighRaw = String(row['rep_high'] || '');
+    const rirRaw = String(row['rir'] || '').trim();
+    const rest = String(row['rest'] || '');
+    const lastSetTechnique = String(row['last_set_technique'] || '').trim();
+    const cue = String(row['cue'] || '').trim();
+
+    if (!exerciseName || isNaN(blockNum)) continue;
+
+    const repLow = repLowRaw.toLowerCase() === 'max' ? 1 : (parseInt(repLowRaw) || 8);
+    const repHigh = repHighRaw.toLowerCase() === 'max' ? 1 : (parseInt(repHighRaw) || 12);
+
+    let rir: number | null = null;
+    if (rirRaw) {
+      const rirParts = rirRaw.split('/').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      if (rirParts.length > 0) {
+        rir = rirParts[0];
+      }
+    }
+
+    let restSeconds = 120;
+    const restMatch = rest.match(/(\d+)/);
+    if (restMatch) {
+      restSeconds = parseInt(restMatch[1]) * 60;
+    }
+
+    const notesParts: string[] = [];
+    if (cue) notesParts.push(cue);
+    if (lastSetTechnique) notesParts.push(`Last set: ${lastSetTechnique}`);
+    if (rirRaw.includes('/')) notesParts.push(`RIR per set: ${rirRaw}`);
+    if (repLowRaw.toLowerCase() === 'max') notesParts.push('Max hold for time');
+    const notes = notesParts.length > 0 ? notesParts.join(' | ') : null;
+
+    if (!blockMap.has(blockNum)) {
+      blockMap.set(blockNum, {
+        blockNumber: blockNum,
+        name: `Block ${blockNum}`,
+        weeks: [{
+          weekNumber: 1,
+          name: 'Week 1',
+          weekType: 'normal',
+          workouts: [],
+        }],
+      });
+    }
+
+    const block = blockMap.get(blockNum)!;
+    const week = block.weeks[0];
+
+    daySet.add(day);
+    const dayNumber = day.charCodeAt(0) - 64; // A=1, B=2, C=3, D=4
+    let workout = week.workouts.find(w => w.dayNumber === dayNumber);
+    if (!workout) {
+      workout = { name: dayName, dayNumber, exercises: [] };
+      week.workouts.push(workout);
+    }
+
+    workout.exercises.push({
+      name: exerciseName,
+      warmupSets: 0,
+      workingSets: sets,
+      repRangeMin: repLow,
+      repRangeMax: repHigh,
+      rir,
+      restSeconds,
+      notes,
+      substitutions: [],
+      category: categorizeExercise(exerciseName),
+    });
+  }
+
+  program.blocks = [...blockMap.values()].sort((a, b) => a.blockNumber - b.blockNumber);
+  program.frequencyPerWeek = daySet.size;
+
+  return program;
+}
+
 function parseMinMaxProgram(workbook: XLSX.WorkBook): ParsedProgram {
   const program: ParsedProgram = {
     name: 'Min-Max Program',
@@ -425,19 +528,28 @@ const handler: Handler = async (event: HandlerEvent) => {
       ? Buffer.from(event.body || '', 'base64')
       : Buffer.from(event.body || '');
 
-    // Simple multipart parsing to get file content
+    // Simple multipart parsing to get file content and form fields
     const parts = body.toString('binary').split(`--${boundary}`);
     let fileBuffer: Buffer | null = null;
+    let fileName = '';
+    let programName = '';
 
     for (const part of parts) {
       if (part.includes('filename=')) {
-        // Find the start of file content (after headers)
+        const filenameMatch = part.match(/filename="([^"]+)"/);
+        if (filenameMatch) {
+          fileName = filenameMatch[1];
+        }
         const headerEnd = part.indexOf('\r\n\r\n');
         if (headerEnd !== -1) {
           const content = part.slice(headerEnd + 4);
-          // Remove trailing \r\n-- if present
           const cleanContent = content.replace(/\r\n--$/, '');
           fileBuffer = Buffer.from(cleanContent, 'binary');
+        }
+      } else if (part.includes('name="programName"')) {
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          programName = part.slice(headerEnd + 4).replace(/\r\n--$/, '').trim();
         }
       }
     }
@@ -450,9 +562,19 @@ const handler: Handler = async (event: HandlerEvent) => {
       };
     }
 
-    // Parse Excel file
-    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-    const parsedProgram = parseMinMaxProgram(workbook);
+    // Detect format and parse
+    let parsedProgram: ParsedProgram;
+    if (isCsvFile(fileName, fileBuffer)) {
+      const csvText = fileBuffer.toString('utf-8');
+      const workbook = XLSX.read(csvText, { type: 'string' });
+      parsedProgram = parseCsvProgram(workbook, programName || undefined);
+    } else {
+      const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+      parsedProgram = parseMinMaxProgram(workbook);
+      if (programName) {
+        parsedProgram.name = programName;
+      }
+    }
 
     // OPTIMIZED: Collect all unique exercises first to minimize DB round-trips
     const allExerciseNames = new Set<string>();
@@ -739,12 +861,21 @@ const handler: Handler = async (event: HandlerEvent) => {
       `;
     }
 
+    const totalWorkouts = parsedProgram.blocks.reduce(
+      (sum, b) => sum + b.weeks.reduce((wSum, w) => wSum + w.workouts.length, 0), 0
+    );
+
     return {
       statusCode: 201,
       headers,
       body: JSON.stringify({
         message: 'Program imported successfully',
         program,
+        summary: {
+          blocks: parsedProgram.blocks.length,
+          workouts: totalWorkouts,
+          exercises: allExerciseNames.size,
+        },
       }),
     };
   } catch (error) {

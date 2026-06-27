@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
-import { userProgramsApi } from '../lib/api';
-import type { UserProgram } from '../types';
+import { useUserContext } from '../contexts/UserContext';
+import { userProgramsApi, bodyWeightApi, workoutLogsApi } from '../lib/api';
+import type { UserProgram, WorkoutLogWithExercises } from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
   program_name?: string;
@@ -11,27 +12,52 @@ interface UserProgramWithDetails extends UserProgram {
 
 export function Home() {
   const { userName, user } = useAuthContext();
+  const { weightUnit } = useUserContext();
   const location = useLocation();
   const [activeProgram, setActiveProgram] = useState<UserProgramWithDetails | null>(null);
   const [loadingProgram, setLoadingProgram] = useState(true);
+  const [recentWorkouts, setRecentWorkouts] = useState<WorkoutLogWithExercises[]>([]);
+  const [bodyWeight, setBodyWeight] = useState('');
+  const [loggingWeight, setLoggingWeight] = useState(false);
+  const [weightMessage, setWeightMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const fetchActiveProgram = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoadingProgram(true);
-    const response = await userProgramsApi.list();
-    console.log('Home: userProgramsApi.list() response:', response);
-    if (response.data) {
-      const active = response.data.find((p: UserProgramWithDetails) => p.is_active);
-      console.log('Home: active program:', active);
+    const [programsRes, workoutsRes] = await Promise.all([
+      userProgramsApi.list(),
+      workoutLogsApi.list({ limit: 5 }),
+    ]);
+    if (programsRes.data) {
+      const active = programsRes.data.find((p: UserProgramWithDetails) => p.is_active);
       setActiveProgram(active || null);
+    }
+    if (workoutsRes.data) {
+      setRecentWorkouts(workoutsRes.data);
     }
     setLoadingProgram(false);
   }, []);
 
-  // Fetch every time the component renders (location.key changes on navigation)
   useEffect(() => {
-    console.log('Home: useEffect triggered, location.key:', location.key);
-    fetchActiveProgram();
-  }, [fetchActiveProgram, location.key]);
+    fetchData();
+  }, [fetchData, location.key]);
+
+  const handleLogWeight = async () => {
+    const value = parseFloat(bodyWeight);
+    if (isNaN(value) || value <= 0) return;
+
+    setLoggingWeight(true);
+    setWeightMessage(null);
+    const unit = user?.preferred_unit === 'metric' ? 'kg' : 'lbs';
+    const response = await bodyWeightApi.create({ weight_value: value, unit });
+    if (response.error) {
+      setWeightMessage({ type: 'error', text: response.error });
+    } else {
+      setWeightMessage({ type: 'success', text: `${value} ${unit} logged` });
+      setBodyWeight('');
+      setTimeout(() => setWeightMessage(null), 3000);
+    }
+    setLoggingWeight(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -143,17 +169,39 @@ export function Home() {
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
             Recent Workouts
           </h2>
-          <Link
-            to="/history"
-            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            View all
-          </Link>
+          {recentWorkouts.length > 0 && (
+            <Link
+              to="/progress"
+              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              View progress
+            </Link>
+          )}
         </div>
-        <div className="text-center py-8 text-slate-500 dark:text-slate-400">
-          <p>No workouts yet</p>
-          <p className="text-sm mt-1">Start tracking to see your history</p>
-        </div>
+        {recentWorkouts.length > 0 ? (
+          <div className="space-y-3">
+            {recentWorkouts.map((workout) => (
+              <div key={workout.id} className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-700 last:border-b-0">
+                <div>
+                  <p className="font-medium text-slate-800 dark:text-slate-100 text-sm">
+                    {workout.workout_template?.name || 'Workout'}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {workout.exercises?.length || 0} exercises
+                  </p>
+                </div>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {new Date(workout.workout_date).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+            <p>No workouts yet</p>
+            <p className="text-sm mt-1">Start tracking to see your history</p>
+          </div>
+        )}
       </div>
 
       {/* Body Weight Quick Log */}
@@ -161,19 +209,36 @@ export function Home() {
         <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">
           Body Weight
         </h2>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <input
             type="number"
+            step="0.1"
             placeholder="Enter weight"
+            value={bodyWeight}
+            onChange={(e) => setBodyWeight(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogWeight()}
             className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
-          <span className="text-slate-600 dark:text-slate-400">
-            {user?.preferred_unit === 'metric' ? 'kg' : 'lbs'}
+          <span className="text-slate-600 dark:text-slate-400 text-sm">
+            {weightUnit}
           </span>
-          <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
-            Log
+          <button
+            onClick={handleLogWeight}
+            disabled={loggingWeight || !bodyWeight}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+          >
+            {loggingWeight ? 'Saving...' : 'Log'}
           </button>
         </div>
+        {weightMessage && (
+          <p className={`text-sm mt-2 ${
+            weightMessage.type === 'success'
+              ? 'text-green-600 dark:text-green-400'
+              : 'text-red-600 dark:text-red-400'
+          }`}>
+            {weightMessage.text}
+          </p>
+        )}
       </div>
     </div>
   );

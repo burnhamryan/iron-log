@@ -1,39 +1,54 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { userProgramsApi, programsApi, workoutLogsApi } from '../lib/api';
+import { userProgramsApi, programsApi, workoutLogsApi, exerciseLogsApi, setLogsApi } from '../lib/api';
+import { useUserContext } from '../contexts/UserContext';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import type { UserProgram, ProgramWithBlocks, WorkoutTemplateWithExercises } from '../types';
+import type { UserProgram, ProgramWithBlocks, WorkoutTemplateWithExercises, TemplateExerciseWithDetails } from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
   program_name?: string;
   frequency_per_week?: number;
 }
 
+interface SetState {
+  weight: string;
+  reps: string;
+  logged: boolean;
+  setLogId?: string;
+}
+
+interface ExerciseState {
+  exerciseLogId: string | null;
+  sets: SetState[];
+  expanded: boolean;
+}
+
 export function Workout() {
+  const { weightUnit } = useUserContext();
   const [loading, setLoading] = useState(true);
   const [activeProgram, setActiveProgram] = useState<UserProgramWithDetails | null>(null);
   const [programDetails, setProgramDetails] = useState<ProgramWithBlocks | null>(null);
   const [currentWeekWorkouts, setCurrentWeekWorkouts] = useState<WorkoutTemplateWithExercises[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutTemplateWithExercises | null>(null);
+  const [workoutLogId, setWorkoutLogId] = useState<string | null>(null);
+  const [exerciseStates, setExerciseStates] = useState<Map<string, ExerciseState>>(new Map());
   const [startingWorkout, setStartingWorkout] = useState(false);
+  const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
 
-      // Get active program
       const programsResponse = await userProgramsApi.list();
       if (programsResponse.data) {
         const active = programsResponse.data.find((p: UserProgramWithDetails) => p.is_active);
         setActiveProgram(active || null);
 
-        // If active program, get full program details
         if (active) {
           const detailsResponse = await programsApi.get(active.program_id);
           if (detailsResponse.data) {
             setProgramDetails(detailsResponse.data);
 
-            // Find current week's workouts
             if (active.current_week_id && detailsResponse.data.blocks) {
               for (const block of detailsResponse.data.blocks) {
                 if (block.weeks) {
@@ -55,11 +70,31 @@ export function Workout() {
     fetchData();
   }, []);
 
+  const initExerciseStates = (workout: WorkoutTemplateWithExercises) => {
+    const states = new Map<string, ExerciseState>();
+    workout.exercises?.forEach((te) => {
+      states.set(te.id, {
+        exerciseLogId: null,
+        sets: Array.from({ length: te.working_sets }, () => ({
+          weight: '',
+          reps: '',
+          logged: false,
+        })),
+        expanded: false,
+      });
+    });
+    // Expand the first exercise by default
+    const firstId = workout.exercises?.[0]?.id;
+    if (firstId && states.has(firstId)) {
+      states.get(firstId)!.expanded = true;
+    }
+    setExerciseStates(states);
+  };
+
   const handleStartWorkout = async (workout: WorkoutTemplateWithExercises) => {
     if (!activeProgram) return;
     setStartingWorkout(true);
 
-    // Create a workout log
     const response = await workoutLogsApi.create({
       user_program_id: activeProgram.id,
       workout_template_id: workout.id,
@@ -67,9 +102,141 @@ export function Workout() {
     });
 
     if (response.data) {
+      setWorkoutLogId(response.data.id);
       setSelectedWorkout(workout);
+      initExerciseStates(workout);
     }
     setStartingWorkout(false);
+  };
+
+  const ensureExerciseLog = async (templateExercise: TemplateExerciseWithDetails): Promise<string | null> => {
+    if (!workoutLogId) return null;
+
+    const state = exerciseStates.get(templateExercise.id);
+    if (state?.exerciseLogId) return state.exerciseLogId;
+
+    const response = await exerciseLogsApi.create({
+      workout_log_id: workoutLogId,
+      exercise_id: templateExercise.exercise.id,
+      template_exercise_id: templateExercise.id,
+      exercise_order: templateExercise.exercise_order,
+    });
+
+    if (response.data) {
+      setExerciseStates(prev => {
+        const next = new Map(prev);
+        const es = next.get(templateExercise.id);
+        if (es) {
+          es.exerciseLogId = response.data!.id;
+        }
+        return next;
+      });
+      return response.data.id;
+    }
+    return null;
+  };
+
+  const handleLogSet = async (templateExercise: TemplateExerciseWithDetails, setIndex: number) => {
+    const state = exerciseStates.get(templateExercise.id);
+    if (!state) return;
+
+    const setData = state.sets[setIndex];
+    const weight = parseFloat(setData.weight);
+    const reps = parseInt(setData.reps);
+    if (isNaN(reps) || reps <= 0) return;
+
+    const exerciseLogId = await ensureExerciseLog(templateExercise);
+    if (!exerciseLogId) return;
+
+    const unit = (templateExercise as TemplateExerciseWithDetails & { weight_unit?: string }).weight_unit ||
+                 (document.querySelector<HTMLInputElement>('[data-unit]')?.dataset.unit as 'lbs' | 'kg') ||
+                 (weightUnit === 'kg' ? 'kg' : 'lbs');
+
+    const response = await setLogsApi.create({
+      exercise_log_id: exerciseLogId,
+      set_number: setIndex + 1,
+      set_type: 'working',
+      weight_value: isNaN(weight) ? undefined : weight,
+      weight_unit: unit as 'lbs' | 'kg',
+      reps_completed: reps,
+    });
+
+    if (response.data) {
+      setExerciseStates(prev => {
+        const next = new Map(prev);
+        const es = next.get(templateExercise.id);
+        if (es) {
+          es.sets[setIndex].logged = true;
+          es.sets[setIndex].setLogId = response.data!.id;
+
+          // Auto-expand next exercise if all sets logged
+          const allLogged = es.sets.every(s => s.logged);
+          if (allLogged) {
+            es.expanded = false;
+            const exercises = selectedWorkout?.exercises || [];
+            const currentIdx = exercises.findIndex(e => e.id === templateExercise.id);
+            const nextExercise = exercises[currentIdx + 1];
+            if (nextExercise) {
+              const nextState = next.get(nextExercise.id);
+              if (nextState) nextState.expanded = true;
+            }
+          }
+        }
+        return next;
+      });
+    }
+  };
+
+  const updateSetField = (templateExerciseId: string, setIndex: number, field: 'weight' | 'reps', value: string) => {
+    setExerciseStates(prev => {
+      const next = new Map(prev);
+      const es = next.get(templateExerciseId);
+      if (es) {
+        es.sets[setIndex][field] = value;
+      }
+      return next;
+    });
+  };
+
+  const toggleExpand = (templateExerciseId: string) => {
+    setExerciseStates(prev => {
+      const next = new Map(prev);
+      const es = next.get(templateExerciseId);
+      if (es) {
+        es.expanded = !es.expanded;
+      }
+      return next;
+    });
+  };
+
+  const toggleNotes = (id: string) => {
+    setShowNotes(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleFinishWorkout = async () => {
+    if (workoutLogId) {
+      await workoutLogsApi.update(workoutLogId, {
+        completed_at: new Date().toISOString(),
+      });
+    }
+    setSelectedWorkout(null);
+    setWorkoutLogId(null);
+    setExerciseStates(new Map());
+  };
+
+  const getCompletionCount = () => {
+    let total = 0;
+    let logged = 0;
+    exerciseStates.forEach(es => {
+      total += es.sets.length;
+      logged += es.sets.filter(s => s.logged).length;
+    });
+    return { total, logged };
   };
 
   if (loading) {
@@ -82,78 +249,163 @@ export function Workout() {
 
   // Active workout view
   if (selectedWorkout) {
+    const { total, logged } = getCompletionCount();
+    const progress = total > 0 ? (logged / total) * 100 : 0;
+
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
             {selectedWorkout.name}
           </h1>
-          <button
-            onClick={() => setSelectedWorkout(null)}
-            className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-          >
-            End Workout
-          </button>
+          <span className="text-sm text-slate-500 dark:text-slate-400">
+            {logged}/{total} sets
+          </span>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-green-500 rounded-full transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          />
         </div>
 
         {/* Exercise List */}
-        <div className="space-y-4">
-          {selectedWorkout.exercises?.map((templateExercise, index) => (
-            <div
-              key={templateExercise.id}
-              className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold text-slate-800 dark:text-slate-100">
-                    {index + 1}. {templateExercise.exercise?.name || 'Exercise'}
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    {templateExercise.working_sets} sets × {templateExercise.rep_range_min}-{templateExercise.rep_range_max} reps
-                    {templateExercise.rir !== null && ` @ ${templateExercise.rir} RIR`}
-                  </p>
-                </div>
-              </div>
+        <div className="space-y-3">
+          {selectedWorkout.exercises?.map((templateExercise, index) => {
+            const state = exerciseStates.get(templateExercise.id);
+            if (!state) return null;
+            const allLogged = state.sets.every(s => s.logged);
 
-              {/* Set inputs */}
-              <div className="space-y-2">
-                {Array.from({ length: templateExercise.working_sets }).map((_, setIndex) => (
-                  <div
-                    key={setIndex}
-                    className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg"
-                  >
-                    <span className="text-sm font-medium text-slate-500 dark:text-slate-400 w-16">
-                      Set {setIndex + 1}
+            return (
+              <div
+                key={templateExercise.id}
+                className={`bg-white dark:bg-slate-800 rounded-lg shadow-sm overflow-hidden ${
+                  allLogged ? 'ring-1 ring-green-500/30' : ''
+                }`}
+              >
+                {/* Exercise header - clickable to expand/collapse */}
+                <button
+                  onClick={() => toggleExpand(templateExercise.id)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                      allLogged
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                    }`}>
+                      {allLogged ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        index + 1
+                      )}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        placeholder="lbs"
-                        className="w-20 px-3 py-2 text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                      />
-                      <span className="text-slate-400">×</span>
-                      <input
-                        type="number"
-                        placeholder="reps"
-                        className="w-20 px-3 py-2 text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                      />
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate">
+                        {templateExercise.exercise?.name || 'Exercise'}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {templateExercise.working_sets}x {templateExercise.rep_range_min}-{templateExercise.rep_range_max}
+                        {templateExercise.rir !== null && ` @ RIR ${templateExercise.rir}`}
+                        {templateExercise.rest_seconds > 0 && ` | ${Math.round(templateExercise.rest_seconds / 60)}min rest`}
+                      </p>
                     </div>
-                    <button className="ml-auto px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg">
-                      Log
-                    </button>
                   </div>
-                ))}
+                  <svg
+                    className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${state.expanded ? 'rotate-180' : ''}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Expanded: notes + set inputs */}
+                {state.expanded && (
+                  <div className="px-4 pb-4 space-y-3">
+                    {/* Notes/cues toggle */}
+                    {templateExercise.notes && (
+                      <div>
+                        <button
+                          onClick={() => toggleNotes(templateExercise.id)}
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {showNotes.has(templateExercise.id) ? 'Hide cues' : 'Show cues'}
+                        </button>
+                        {showNotes.has(templateExercise.id) && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 bg-slate-50 dark:bg-slate-700/50 p-2 rounded leading-relaxed">
+                            {templateExercise.notes}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Set inputs */}
+                    <div className="space-y-2">
+                      {state.sets.map((setData, setIndex) => (
+                        <div
+                          key={setIndex}
+                          className={`flex items-center gap-2 p-2 rounded-lg ${
+                            setData.logged
+                              ? 'bg-green-50 dark:bg-green-900/20'
+                              : 'bg-slate-50 dark:bg-slate-700/50'
+                          }`}
+                        >
+                          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-8 text-center">
+                            S{setIndex + 1}
+                          </span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            placeholder={weightUnit}
+                            value={setData.weight}
+                            onChange={(e) => updateSetField(templateExercise.id, setIndex, 'weight', e.target.value)}
+                            disabled={setData.logged}
+                            className="w-20 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
+                          />
+                          <span className="text-slate-400 text-xs">x</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            placeholder="reps"
+                            value={setData.reps}
+                            onChange={(e) => updateSetField(templateExercise.id, setIndex, 'reps', e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleLogSet(templateExercise, setIndex)}
+                            disabled={setData.logged}
+                            className="w-16 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
+                          />
+                          {setData.logged ? (
+                            <svg className="w-5 h-5 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : (
+                            <button
+                              onClick={() => handleLogSet(templateExercise, setIndex)}
+                              disabled={!setData.reps}
+                              className="ml-auto px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:dark:bg-slate-600 text-white rounded-lg transition-colors flex-shrink-0"
+                            >
+                              Log
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Finish Workout Button */}
         <button
-          onClick={() => setSelectedWorkout(null)}
+          onClick={handleFinishWorkout}
           className="w-full px-4 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-colors"
         >
-          Finish Workout
+          Finish Workout ({logged}/{total} sets logged)
         </button>
       </div>
     );
@@ -248,19 +500,12 @@ export function Workout() {
         <p className="text-slate-600 dark:text-slate-400 mb-4">
           Start an empty workout and add exercises as you go
         </p>
-        <button className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
-          Start Empty Workout
-        </button>
-      </div>
-
-      {/* Repeat Previous Section */}
-      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">
-          Repeat Previous
-        </h2>
-        <div className="text-center py-8 text-slate-500 dark:text-slate-400">
-          <p>No previous workouts</p>
-        </div>
+        <Link
+          to="/programs"
+          className="block w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-center"
+        >
+          Import a Program
+        </Link>
       </div>
     </div>
   );

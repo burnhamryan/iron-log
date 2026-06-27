@@ -107,7 +107,7 @@ export const programsApi = {
       method: 'POST',
       body: JSON.stringify(programData),
     }),
-  import: (formData: FormData) => apiUpload<{ message: string; program: import('../types').Program }>('/excel-import', formData),
+  import: (formData: FormData) => apiUpload<{ message: string; program: import('../types').Program; summary: { blocks: number; workouts: number; exercises: number } }>('/excel-import', formData),
 };
 
 // Exercises API

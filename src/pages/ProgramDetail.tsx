@@ -247,16 +247,23 @@ export function ProgramDetail() {
                                 {workout.exercises?.map((templateExercise) => (
                                   <div
                                     key={templateExercise.id}
-                                    className="flex items-center justify-between text-sm"
+                                    className="py-2 border-b border-slate-100 dark:border-slate-600 last:border-b-0"
                                   >
-                                    <span className="text-slate-700 dark:text-slate-300">
-                                      {templateExercise.exercise?.name || 'Unknown Exercise'}
-                                    </span>
-                                    <span className="text-slate-500 dark:text-slate-400">
-                                      {templateExercise.working_sets} x {templateExercise.rep_range_min}-
-                                      {templateExercise.rep_range_max}
-                                      {templateExercise.rir !== null && ` @ ${templateExercise.rir} RIR`}
-                                    </span>
+                                    <div className="flex items-center justify-between text-sm">
+                                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                                        {templateExercise.exercise?.name || 'Unknown Exercise'}
+                                      </span>
+                                      <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap ml-3">
+                                        {templateExercise.working_sets} x {templateExercise.rep_range_min}-
+                                        {templateExercise.rep_range_max}
+                                        {templateExercise.rir !== null && ` @ ${templateExercise.rir} RIR`}
+                                      </span>
+                                    </div>
+                                    {templateExercise.notes && (
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                                        {templateExercise.notes}
+                                      </p>
+                                    )}
                                   </div>
                                 ))}
                               </div>

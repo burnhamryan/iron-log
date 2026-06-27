@@ -57,7 +57,7 @@ export function Programs() {
               d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
             />
           </svg>
-          Import Excel
+          Import
         </button>
       </div>
 
@@ -86,7 +86,7 @@ export function Programs() {
             No programs yet
           </h2>
           <p className="text-slate-600 dark:text-slate-400 mb-4">
-            Import a workout program from Excel to get started
+            Import a workout program to get started
           </p>
           <button
             onClick={() => setShowImport(true)}
