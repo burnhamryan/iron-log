@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
-import { usersApi } from '../lib/api';
+import { usersApi, workoutLogsApi, bodyWeightApi } from '../lib/api';
 
 export function Settings() {
   const { user, refreshUser } = useAuthContext();
   const { preferredUnit, setPreferredUnit, isDarkMode, toggleDarkMode } = useUserContext();
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleUnitChange = async (unit: 'imperial' | 'metric') => {
@@ -24,6 +25,41 @@ export function Settings() {
     }
 
     setSaving(false);
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleExportData = async () => {
+    setExporting(true);
+    setMessage(null);
+
+    try {
+      const [workoutsRes, bodyWeightRes] = await Promise.all([
+        workoutLogsApi.list({ limit: 1000 }),
+        bodyWeightApi.list({ limit: 1000 }),
+      ]);
+
+      const exportData = {
+        exported_at: new Date().toISOString(),
+        workouts: workoutsRes.data || [],
+        body_weight: bodyWeightRes.data || [],
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `iron-log-export-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setMessage({ type: 'success', text: 'Data exported successfully!' });
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to export data' });
+    }
+
+    setExporting(false);
     setTimeout(() => setMessage(null), 3000);
   };
 
@@ -136,10 +172,16 @@ export function Settings() {
           Data
         </h2>
         <div className="space-y-4">
-          <button className="w-full text-left px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-            <p className="font-medium text-slate-800 dark:text-slate-100">Export Data</p>
+          <button
+            onClick={handleExportData}
+            disabled={exporting}
+            className="w-full text-left px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+          >
+            <p className="font-medium text-slate-800 dark:text-slate-100">
+              {exporting ? 'Exporting...' : 'Export Data'}
+            </p>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Download all your workout data
+              Download all your workout data as JSON
             </p>
           </button>
         </div>

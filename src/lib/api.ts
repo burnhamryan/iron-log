@@ -108,6 +108,8 @@ export const programsApi = {
       body: JSON.stringify(programData),
     }),
   import: (formData: FormData) => apiUpload<{ message: string; program: import('../types').Program; summary: { blocks: number; workouts: number; exercises: number } }>('/excel-import', formData),
+  delete: (id: string) =>
+    apiRequestWithAuth<void>(`/programs/${id}`, { method: 'DELETE' }),
 };
 
 // Exercises API

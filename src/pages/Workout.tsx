@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { userProgramsApi, programsApi, workoutLogsApi, exerciseLogsApi, setLogsApi } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
@@ -23,6 +23,44 @@ interface ExerciseState {
   expanded: boolean;
 }
 
+function RestTimer({ seconds, onDone }: { seconds: number; onDone: () => void }) {
+  const [remaining, setRemaining] = useState(seconds);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setRemaining(prev => {
+        if (prev <= 1) {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          onDone();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [seconds, onDone]);
+
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  const pct = (remaining / seconds) * 100;
+
+  return (
+    <div className="fixed bottom-20 left-0 right-0 mx-4 md:mx-auto md:max-w-md z-40">
+      <div className="bg-slate-800 dark:bg-slate-700 text-white rounded-xl p-4 shadow-lg">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium">Rest Timer</span>
+          <button onClick={onDone} className="text-xs text-slate-400 hover:text-white">Skip</button>
+        </div>
+        <div className="text-3xl font-bold text-center mb-2">{mins}:{secs.toString().padStart(2, '0')}</div>
+        <div className="h-1.5 bg-slate-600 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Workout() {
   const { weightUnit } = useUserContext();
   const [loading, setLoading] = useState(true);
@@ -34,6 +72,8 @@ export function Workout() {
   const [exerciseStates, setExerciseStates] = useState<Map<string, ExerciseState>>(new Map());
   const [startingWorkout, setStartingWorkout] = useState(false);
   const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
+  const [restTimer, setRestTimer] = useState<{ seconds: number } | null>(null);
+  const dismissTimer = useCallback(() => setRestTimer(null), []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -148,9 +188,7 @@ export function Workout() {
     const exerciseLogId = await ensureExerciseLog(templateExercise);
     if (!exerciseLogId) return;
 
-    const unit = (templateExercise as TemplateExerciseWithDetails & { weight_unit?: string }).weight_unit ||
-                 (document.querySelector<HTMLInputElement>('[data-unit]')?.dataset.unit as 'lbs' | 'kg') ||
-                 (weightUnit === 'kg' ? 'kg' : 'lbs');
+    const unit: 'lbs' | 'kg' = weightUnit === 'kg' ? 'kg' : 'lbs';
 
     const response = await setLogsApi.create({
       exercise_log_id: exerciseLogId,
@@ -169,6 +207,12 @@ export function Workout() {
           es.sets[setIndex].logged = true;
           es.sets[setIndex].setLogId = response.data!.id;
 
+          // Carry forward weight to next unlogged set
+          const nextUnlogged = es.sets.findIndex((s, i) => i > setIndex && !s.logged);
+          if (nextUnlogged !== -1 && !es.sets[nextUnlogged].weight && setData.weight) {
+            es.sets[nextUnlogged].weight = setData.weight;
+          }
+
           // Auto-expand next exercise if all sets logged
           const allLogged = es.sets.every(s => s.logged);
           if (allLogged) {
@@ -184,6 +228,11 @@ export function Workout() {
         }
         return next;
       });
+
+      // Start rest timer
+      if (templateExercise.rest_seconds > 0) {
+        setRestTimer({ seconds: templateExercise.rest_seconds });
+      }
     }
   };
 
@@ -407,6 +456,11 @@ export function Workout() {
         >
           Finish Workout ({logged}/{total} sets logged)
         </button>
+
+        {/* Rest Timer */}
+        {restTimer && (
+          <RestTimer seconds={restTimer.seconds} onDone={dismissTimer} />
+        )}
       </div>
     );
   }
@@ -446,10 +500,11 @@ export function Workout() {
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="font-medium text-slate-800 dark:text-slate-100">
-                          {workout.name}
+                          Day {workout.day_number}: {workout.name}
                         </h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">
-                          {workout.exercises?.length || 0} exercises
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          {workout.exercises?.slice(0, 4).map(e => e.exercise?.name).filter(Boolean).join(', ')}
+                          {(workout.exercises?.length || 0) > 4 && ` +${(workout.exercises?.length || 0) - 4} more`}
                         </p>
                       </div>
                       {startingWorkout ? (
@@ -492,21 +547,23 @@ export function Workout() {
         )}
       </div>
 
-      {/* Quick Workout Section */}
-      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">
-          Quick Workout
-        </h2>
-        <p className="text-slate-600 dark:text-slate-400 mb-4">
-          Start an empty workout and add exercises as you go
-        </p>
-        <Link
-          to="/programs"
-          className="block w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-center"
-        >
-          Import a Program
-        </Link>
-      </div>
+      {/* Import prompt when no program */}
+      {!activeProgram && (
+        <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">
+            Get Started
+          </h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
+            Import a workout program to start tracking your lifts
+          </p>
+          <Link
+            to="/programs"
+            className="block w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-center font-medium"
+          >
+            Import a Program
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

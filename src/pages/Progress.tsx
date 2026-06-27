@@ -20,7 +20,10 @@ export function Progress() {
   const [exerciseProgress, setExerciseProgress] = useState<ExerciseProgress[]>([]);
   const [bodyWeightLogs, setBodyWeightLogs] = useState<BodyWeightLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [progressLoading, setProgressLoading] = useState(false);
+  const [progressError, setProgressError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'exercises' | 'bodyweight'>('exercises');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,13 +46,22 @@ export function Progress() {
 
   useEffect(() => {
     if (selectedExercise) {
+      setProgressLoading(true);
+      setProgressError(null);
       progressApi.getExerciseProgress(selectedExercise, { days: 90 }).then((res) => {
         if (res.data) {
           setExerciseProgress(res.data);
+        } else if (res.error) {
+          setProgressError(res.error);
         }
+        setProgressLoading(false);
       });
     }
   }, [selectedExercise]);
+
+  const filteredExercises = searchQuery
+    ? exercises.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : exercises;
 
   if (loading) {
     return (
@@ -96,15 +108,23 @@ export function Progress() {
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Select Exercise
             </label>
+            <input
+              type="text"
+              placeholder="Search exercises..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-4 py-2 mb-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
             <select
               value={selectedExercise}
               onChange={(e) => setSelectedExercise(e.target.value)}
               className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
             >
               <option value="">Choose an exercise...</option>
-              {exercises.map((exercise) => (
+              {filteredExercises.map((exercise) => (
                 <option key={exercise.id} value={exercise.id}>
                   {exercise.name}
+                  {exercise.category ? ` (${exercise.category})` : ''}
                 </option>
               ))}
             </select>
@@ -116,7 +136,15 @@ export function Progress() {
               <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">
                 Weight Progress
               </h2>
-              {exerciseProgress.length > 0 ? (
+              {progressLoading ? (
+                <div className="flex justify-center py-8">
+                  <LoadingSpinner size="md" />
+                </div>
+              ) : progressError ? (
+                <div className="text-center py-8 text-red-500 dark:text-red-400">
+                  <p>{progressError}</p>
+                </div>
+              ) : exerciseProgress.length > 0 ? (
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={exerciseProgress}>
@@ -124,7 +152,8 @@ export function Progress() {
                       <XAxis
                         dataKey="date"
                         stroke="#9CA3AF"
-                        tick={{ fill: '#9CA3AF' }}
+                        tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                        tickFormatter={(value) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                       />
                       <YAxis
                         stroke="#9CA3AF"
@@ -143,14 +172,16 @@ export function Progress() {
                           borderRadius: '8px',
                         }}
                         labelStyle={{ color: '#F3F4F6' }}
+                        labelFormatter={(value) => new Date(value).toLocaleDateString()}
                       />
                       <Line
                         type="monotone"
                         dataKey="max_weight"
                         stroke="#3B82F6"
                         strokeWidth={2}
-                        dot={{ fill: '#3B82F6' }}
-                        name="Max Weight"
+                        dot={{ fill: '#3B82F6', r: 4 }}
+                        activeDot={{ r: 6 }}
+                        name={`Max Weight (${weightUnit})`}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -203,7 +234,7 @@ export function Progress() {
                     }))}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9CA3AF" tick={{ fill: '#9CA3AF' }} />
+                  <XAxis dataKey="date" stroke="#9CA3AF" tick={{ fill: '#9CA3AF', fontSize: 12 }} />
                   <YAxis
                     stroke="#9CA3AF"
                     tick={{ fill: '#9CA3AF' }}
@@ -228,8 +259,9 @@ export function Progress() {
                     dataKey="weight"
                     stroke="#10B981"
                     strokeWidth={2}
-                    dot={{ fill: '#10B981' }}
-                    name="Body Weight"
+                    dot={{ fill: '#10B981', r: 4 }}
+                    activeDot={{ r: 6 }}
+                    name={`Body Weight (${weightUnit})`}
                   />
                 </LineChart>
               </ResponsiveContainer>

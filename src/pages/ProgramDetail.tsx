@@ -11,6 +11,8 @@ export function ProgramDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
 
@@ -22,9 +24,13 @@ export function ProgramDetail() {
       const response = await programsApi.get(id);
       if (response.data) {
         setProgram(response.data);
-        // Expand the first block by default
         if (response.data.blocks && response.data.blocks.length > 0) {
           setExpandedBlocks(new Set([response.data.blocks[0].id]));
+          // Auto-expand first week too
+          const firstWeek = response.data.blocks[0].weeks?.[0];
+          if (firstWeek) {
+            setExpandedWeeks(new Set([firstWeek.id]));
+          }
         }
       } else if (response.error) {
         setError(response.error);
@@ -38,16 +44,26 @@ export function ProgramDetail() {
   const handleStartProgram = async () => {
     if (!id) return;
     setStarting(true);
-    console.log('Starting program with id:', id);
     const response = await userProgramsApi.start(id);
-    console.log('Start program response:', response);
     if (response.data) {
       navigate('/');
     } else if (response.error) {
-      console.error('Start program error:', response.error);
       setError(response.error);
     }
     setStarting(false);
+  };
+
+  const handleDeleteProgram = async () => {
+    if (!id) return;
+    setDeleting(true);
+    const response = await programsApi.delete(id);
+    if (response.error) {
+      setError(response.error);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    } else {
+      navigate('/programs');
+    }
   };
 
   const toggleBlock = (blockId: string) => {
@@ -72,6 +88,20 @@ export function ProgramDetail() {
       }
       return next;
     });
+  };
+
+  const expandAll = () => {
+    if (!program?.blocks) return;
+    const blockIds = new Set(program.blocks.map(b => b.id));
+    const weekIds = new Set<string>();
+    program.blocks.forEach(b => b.weeks?.forEach(w => weekIds.add(w.id)));
+    setExpandedBlocks(blockIds);
+    setExpandedWeeks(weekIds);
+  };
+
+  const collapseAll = () => {
+    setExpandedBlocks(new Set());
+    setExpandedWeeks(new Set());
   };
 
   if (loading) {
@@ -101,60 +131,78 @@ export function ProgramDetail() {
     );
   }
 
+  const totalExercises = program.blocks?.reduce(
+    (sum, b) => sum + (b.weeks?.reduce(
+      (wSum, w) => wSum + (w.workouts?.reduce(
+        (woSum, wo) => woSum + (wo.exercises?.length || 0), 0) || 0), 0) || 0), 0) || 0;
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <Link
-            to="/programs"
-            className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to Programs
-          </Link>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">{program.name}</h1>
-          {program.description && (
-            <p className="text-slate-600 dark:text-slate-400 mt-1">{program.description}</p>
-          )}
-          <div className="flex items-center gap-4 mt-2 text-sm text-slate-500 dark:text-slate-400">
-            <span>{program.frequency_per_week}x per week</span>
-            {program.source && <span>by {program.source}</span>}
-          </div>
-        </div>
-        <button
-          onClick={handleStartProgram}
-          disabled={starting}
-          className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors flex items-center gap-2"
+      <div>
+        <Link
+          to="/programs"
+          className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-3"
         >
-          {starting ? (
-            <>
-              <LoadingSpinner size="sm" />
-              Starting...
-            </>
-          ) : (
-            <>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Start Program
-            </>
-          )}
-        </button>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Programs
+        </Link>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">{program.name}</h1>
+            {program.description && (
+              <p className="text-slate-600 dark:text-slate-400 mt-1">{program.description}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-slate-500 dark:text-slate-400">
+              <span>{program.frequency_per_week}x per week</span>
+              {program.source && <span>by {program.source}</span>}
+              <span>{program.blocks?.length || 0} blocks</span>
+              <span>{totalExercises} exercises</span>
+            </div>
+          </div>
+          <button
+            onClick={handleStartProgram}
+            disabled={starting}
+            className="flex-shrink-0 px-5 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
+          >
+            {starting ? (
+              <>
+                <LoadingSpinner size="sm" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Start Program
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Expand/Collapse controls */}
+      {program.blocks && program.blocks.length > 0 && (
+        <div className="flex gap-2">
+          <button
+            onClick={expandAll}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            Expand all
+          </button>
+          <span className="text-slate-300 dark:text-slate-600">|</span>
+          <button
+            onClick={collapseAll}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            Collapse all
+          </button>
+        </div>
+      )}
 
       {/* Blocks */}
       {program.blocks && program.blocks.length > 0 ? (
@@ -180,12 +228,7 @@ export function ProgramDetail() {
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
 
@@ -223,12 +266,7 @@ export function ProgramDetail() {
                           stroke="currentColor"
                           viewBox="0 0 24 24"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                          />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
 
@@ -243,7 +281,7 @@ export function ProgramDetail() {
                               <h4 className="font-medium text-slate-800 dark:text-slate-200 mb-3">
                                 {workout.name}
                               </h4>
-                              <div className="space-y-2">
+                              <div className="space-y-1">
                                 {workout.exercises?.map((templateExercise) => (
                                   <div
                                     key={templateExercise.id}
@@ -285,6 +323,42 @@ export function ProgramDetail() {
           </p>
         </div>
       )}
+
+      {/* Delete Program */}
+      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">
+          Danger Zone
+        </h2>
+        {showDeleteConfirm ? (
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400 mb-3">
+              Are you sure you want to delete "{program.name}"? This will remove all blocks, weeks, and workout templates. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleDeleteProgram}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                {deleting ? 'Deleting...' : 'Yes, Delete Program'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded-lg text-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Delete Program
+          </button>
+        )}
+      </div>
     </div>
   );
 }

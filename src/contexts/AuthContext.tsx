@@ -43,27 +43,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // Try to get existing user
       const response = await usersApi.get();
-      console.log('usersApi.get() response:', response);
 
       if (response.data) {
         setUser(response.data);
       } else if (response.error) {
-        console.log('User fetch error, attempting to create user:', response.error);
-        // Create new user if not found or any auth error (first time user)
         const email = clerkUser.emailAddresses[0]?.emailAddress || '';
         const createResponse = await usersApi.create({
           email,
           first_name: clerkUser.firstName || undefined,
           last_name: clerkUser.lastName || undefined,
         });
-        console.log('usersApi.create() response:', createResponse);
 
         if (createResponse.data) {
           setUser(createResponse.data);
-        } else {
-          console.error('Failed to create user:', createResponse.error);
         }
       }
     } catch (error) {

@@ -158,7 +158,20 @@ const handler: Handler = async (event: HandlerEvent) => {
       const pathParts = event.path.split('/').filter(Boolean);
       const programId = pathParts[pathParts.length - 1];
 
-      await sql`DELETE FROM programs WHERE id = ${programId}`;
+      // Get user ID for ownership check
+      let deleteUserId = null;
+      if (clerkUserId) {
+        const user = await sql`SELECT id FROM users WHERE clerk_user_id = ${clerkUserId}`;
+        if (user.length > 0) deleteUserId = user[0].id;
+      }
+      if (!deleteUserId) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
+      }
+
+      const result = await sql`DELETE FROM programs WHERE id = ${programId} AND created_by = ${deleteUserId}`;
+      if (result.count === 0) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Program not found' }) };
+      }
 
       return {
         statusCode: 204,

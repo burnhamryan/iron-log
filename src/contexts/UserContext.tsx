@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { useAuthContext } from './AuthContext';
 import type { WeightUnit } from '../lib/units';
 
@@ -48,10 +48,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Apply dark mode on mount
-  if (isDarkMode) {
-    document.documentElement.classList.add('dark');
-  }
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   const value: UserContextType = {
     preferredUnit,
