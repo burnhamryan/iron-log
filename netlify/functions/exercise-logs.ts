@@ -48,6 +48,21 @@ const handler: Handler = async (event: HandlerEvent) => {
         return { statusCode: 403, headers, body: JSON.stringify({ error: 'Forbidden' }) };
       }
 
+      // Reuse the existing log when this exercise is already part of the workout,
+      // so resuming a workout doesn't fork its sets across duplicate rows.
+      const [existing] = await sql`
+        SELECT * FROM exercise_logs
+        WHERE workout_log_id = ${workout_log_id}
+          AND exercise_id = ${exercise_id}
+          AND template_exercise_id IS NOT DISTINCT FROM ${template_exercise_id || null}
+        ORDER BY created_at
+        LIMIT 1
+      `;
+
+      if (existing) {
+        return { statusCode: 200, headers, body: JSON.stringify(existing) };
+      }
+
       const [exerciseLog] = await sql`
         INSERT INTO exercise_logs (workout_log_id, exercise_id, template_exercise_id, exercise_order)
         VALUES (${workout_log_id}, ${exercise_id}, ${template_exercise_id || null}, ${exercise_order || 1})

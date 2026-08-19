@@ -169,7 +169,35 @@ export interface ExerciseLogWithSets extends ExerciseLog {
 
 export interface WorkoutLogWithExercises extends WorkoutLog {
   exercises: ExerciseLogWithSets[];
-  workout_template?: WorkoutTemplate;
+  workout_name?: string | null;
+  day_number?: number | null;
+}
+
+// Row shape returned by the workout log list endpoint
+export interface WorkoutLogSummary extends WorkoutLog {
+  workout_name?: string | null;
+  day_number?: number | null;
+  exercise_count: number;
+  set_count: number;
+  total_volume: number;
+}
+
+// Sets logged the last time an exercise was performed
+export interface LastPerformedSet {
+  id: string;
+  set_number: number;
+  set_type: 'warmup' | 'working';
+  weight_value: number | null;
+  weight_unit: 'lbs' | 'kg';
+  reps_completed: number | null;
+  rir_actual: number | null;
+}
+
+export interface LastExercisePerformance {
+  exercise_id: string;
+  workout_log_id: string;
+  workout_date: string;
+  sets: LastPerformedSet[];
 }
 
 // Progress tracking

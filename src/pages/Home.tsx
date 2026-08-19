@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
 import { userProgramsApi, bodyWeightApi, workoutLogsApi } from '../lib/api';
-import type { UserProgram, WorkoutLogWithExercises } from '../types';
+import type { UserProgram, WorkoutLogSummary } from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
   program_name?: string;
@@ -16,7 +16,7 @@ export function Home() {
   const location = useLocation();
   const [activeProgram, setActiveProgram] = useState<UserProgramWithDetails | null>(null);
   const [loadingProgram, setLoadingProgram] = useState(true);
-  const [recentWorkouts, setRecentWorkouts] = useState<WorkoutLogWithExercises[]>([]);
+  const [recentWorkouts, setRecentWorkouts] = useState<WorkoutLogSummary[]>([]);
   const [bodyWeight, setBodyWeight] = useState('');
   const [loggingWeight, setLoggingWeight] = useState(false);
   const [weightMessage, setWeightMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -171,29 +171,36 @@ export function Home() {
           </h2>
           {recentWorkouts.length > 0 && (
             <Link
-              to="/progress"
+              to="/history"
               className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
             >
-              View progress
+              View all
             </Link>
           )}
         </div>
         {recentWorkouts.length > 0 ? (
           <div className="space-y-3">
             {recentWorkouts.map((workout) => (
-              <div key={workout.id} className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-700 last:border-b-0">
+              <Link
+                key={workout.id}
+                to="/history"
+                className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-700 last:border-b-0"
+              >
                 <div>
                   <p className="font-medium text-slate-800 dark:text-slate-100 text-sm">
-                    {workout.workout_template?.name || 'Workout'}
+                    {workout.workout_name || 'Workout'}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {workout.exercises?.length || 0} exercises
+                    {workout.exercise_count} {workout.exercise_count === 1 ? 'exercise' : 'exercises'}
+                    {' \u00b7 '}
+                    {workout.set_count} {workout.set_count === 1 ? 'set' : 'sets'}
+                    {!workout.completed_at && ' \u00b7 in progress'}
                   </p>
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {new Date(workout.workout_date).toLocaleDateString()}
+                  {new Date(`${workout.workout_date}T00:00:00`).toLocaleDateString()}
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         ) : (

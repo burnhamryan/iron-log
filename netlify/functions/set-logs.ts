@@ -61,9 +61,34 @@ const handler: Handler = async (event: HandlerEvent) => {
         return { statusCode: 403, headers, body: JSON.stringify({ error: 'Forbidden' }) };
       }
 
+      // Re-logging the same set of the same exercise overwrites it rather than
+      // stacking a duplicate row (happens when a workout is resumed).
+      const [existing] = await sql`
+        SELECT id FROM set_logs
+        WHERE exercise_log_id = ${exercise_log_id}
+          AND set_number = ${set_number}
+          AND set_type = ${set_type}
+        ORDER BY created_at
+        LIMIT 1
+      `;
+
+      if (existing) {
+        const [updated] = await sql`
+          UPDATE set_logs
+          SET
+            weight_value = ${weight_value ?? null},
+            weight_unit = ${weight_unit},
+            reps_completed = ${reps_completed ?? null},
+            rir_actual = ${rir_actual ?? null}
+          WHERE id = ${existing.id}
+          RETURNING *
+        `;
+        return { statusCode: 200, headers, body: JSON.stringify(updated) };
+      }
+
       const [setLog] = await sql`
         INSERT INTO set_logs (exercise_log_id, set_number, set_type, weight_value, weight_unit, reps_completed, rir_actual)
-        VALUES (${exercise_log_id}, ${set_number}, ${set_type}, ${weight_value || null}, ${weight_unit}, ${reps_completed || null}, ${rir_actual || null})
+        VALUES (${exercise_log_id}, ${set_number}, ${set_type}, ${weight_value ?? null}, ${weight_unit}, ${reps_completed ?? null}, ${rir_actual ?? null})
         RETURNING *
       `;
 
@@ -82,11 +107,11 @@ const handler: Handler = async (event: HandlerEvent) => {
       const [setLog] = await sql`
         UPDATE set_logs sl
         SET
-          weight_value = COALESCE(${weight_value}, sl.weight_value),
-          weight_unit = COALESCE(${weight_unit}, sl.weight_unit),
-          reps_completed = COALESCE(${reps_completed}, sl.reps_completed),
-          rir_actual = COALESCE(${rir_actual}, sl.rir_actual),
-          is_pr = COALESCE(${is_pr}, sl.is_pr)
+          weight_value = COALESCE(${weight_value ?? null}, sl.weight_value),
+          weight_unit = COALESCE(${weight_unit ?? null}, sl.weight_unit),
+          reps_completed = COALESCE(${reps_completed ?? null}, sl.reps_completed),
+          rir_actual = COALESCE(${rir_actual ?? null}, sl.rir_actual),
+          is_pr = COALESCE(${is_pr ?? null}, sl.is_pr)
         FROM exercise_logs el
         JOIN workout_logs wl ON el.workout_log_id = wl.id
         WHERE sl.id = ${setLogId}
