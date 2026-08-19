@@ -9,6 +9,7 @@ import {
   exerciseHistoryApi,
 } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
+import { useRestTimer } from '../contexts/restTimerContext';
 import { type WeightUnit } from '../lib/units';
 import {
   lastWeightIn,
@@ -61,46 +62,9 @@ function findTemplateInProgram(
   return null;
 }
 
-function RestTimer({ seconds, onDone }: { seconds: number; onDone: () => void }) {
-  const [remaining, setRemaining] = useState(seconds);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setRemaining(prev => {
-        if (prev <= 1) {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          onDone();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [seconds, onDone]);
-
-  const mins = Math.floor(remaining / 60);
-  const secs = remaining % 60;
-  const pct = (remaining / seconds) * 100;
-
-  return (
-    <div className="fixed bottom-20 left-0 right-0 mx-4 md:mx-auto md:max-w-md z-40">
-      <div className="bg-slate-800 dark:bg-slate-700 text-white rounded-xl p-4 shadow-lg">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">Rest Timer</span>
-          <button onClick={onDone} className="text-xs text-slate-400 hover:text-white">Skip</button>
-        </div>
-        <div className="text-3xl font-bold text-center mb-2">{mins}:{secs.toString().padStart(2, '0')}</div>
-        <div className="h-1.5 bg-slate-600 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function Workout() {
   const { weightUnit } = useUserContext();
+  const { startRest, stopRest } = useRestTimer();
   const [loading, setLoading] = useState(true);
   const [activeProgram, setActiveProgram] = useState<UserProgramWithDetails | null>(null);
   const [programDetails, setProgramDetails] = useState<ProgramWithBlocks | null>(null);
@@ -112,8 +76,6 @@ export function Workout() {
   const [startingWorkout, setStartingWorkout] = useState(false);
   const [resumed, setResumed] = useState(false);
   const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
-  const [restTimer, setRestTimer] = useState<{ seconds: number } | null>(null);
-  const dismissTimer = useCallback(() => setRestTimer(null), []);
 
   // Read by the mount effect, which must not re-run when the unit toggle changes
   const weightUnitRef = useRef<WeightUnit>(weightUnit);
@@ -361,9 +323,9 @@ export function Workout() {
         return next;
       });
 
-      // Start rest timer
+      // Rest runs in the layout, so it keeps going if you leave this screen
       if (templateExercise.rest_seconds > 0) {
-        setRestTimer({ seconds: templateExercise.rest_seconds });
+        startRest(templateExercise.rest_seconds);
       }
     }
   };
@@ -423,7 +385,6 @@ export function Workout() {
     setWorkoutLogId(null);
     setExerciseStates(new Map());
     setLastPerformance(new Map());
-    setRestTimer(null);
     setResumed(false);
   };
 
@@ -455,6 +416,7 @@ export function Workout() {
       }
     }
 
+    stopRest();
     closeWorkout();
   };
 
@@ -670,11 +632,6 @@ export function Workout() {
         >
           Finish Workout ({logged}/{total} sets logged)
         </button>
-
-        {/* Rest Timer */}
-        {restTimer && (
-          <RestTimer seconds={restTimer.seconds} onDone={dismissTimer} />
-        )}
       </div>
     );
   }

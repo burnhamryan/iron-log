@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Header } from './Header';
 import { BottomNav } from './BottomNav';
+import { RestTimer } from '../workout/RestTimer';
 
 export function Layout() {
   return (
@@ -11,6 +12,7 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
+      <RestTimer />
       <BottomNav />
     </div>
   );

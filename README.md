@@ -9,6 +9,7 @@ A progressive web app for tracking workouts and strength training progress.
   weight and reps shown inline so you know what to beat
 - **Workout History**: Every logged session is saved and browsable, and an unfinished
   workout picks up where you left off
+- **Rest Timer**: Keeps running when you switch screens, background the app, or reload
 - **Progress Tracking**: Monitor your strength gains over time
 - **PWA Support**: Install on mobile devices for offline access
 - **Dark Mode**: Easy on the eyes during those late-night gym sessions
