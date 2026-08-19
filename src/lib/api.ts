@@ -31,13 +31,23 @@ async function apiRequest<T>(
       headers,
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return { error: data.error || 'An error occurred' };
+    // DELETE endpoints answer 204 with no body, so don't assume JSON
+    const text = await response.text();
+    let data: unknown = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
     }
 
-    return { data };
+    if (!response.ok) {
+      const message = (data as { error?: string } | null)?.error;
+      return { error: message || `Request failed (${response.status})` };
+    }
+
+    return { data: (data ?? undefined) as T };
   } catch (error) {
     console.error('API request failed:', error);
     return { error: 'Network error. Please try again.' };
@@ -151,11 +161,16 @@ export const schedulesApi = {
 
 // Workout Logs API
 export const workoutLogsApi = {
-  list: (params?: { limit?: number; offset?: number }) => {
+  list: (params?: {
+    limit?: number;
+    offset?: number;
+    status?: 'all' | 'completed' | 'in_progress';
+    include_empty?: boolean;
+  }) => {
     const query = params
       ? `?${new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))}`
       : '';
-    return apiRequestWithAuth<import('../types').WorkoutLogWithExercises[]>(`/workout-logs${query}`);
+    return apiRequestWithAuth<import('../types').WorkoutLogSummary[]>(`/workout-logs${query}`);
   },
   get: (id: string) => apiRequestWithAuth<import('../types').WorkoutLogWithExercises>(`/workout-logs/${id}`),
   create: (data: import('../types').CreateWorkoutLogInput) =>
@@ -215,6 +230,17 @@ export const bodyWeightApi = {
     }),
   delete: (id: string) =>
     apiRequestWithAuth<void>(`/body-weight/${id}`, { method: 'DELETE' }),
+};
+
+// Exercise History API
+export const exerciseHistoryApi = {
+  getLastPerformed: (exerciseIds: string[], excludeWorkoutLogId?: string) => {
+    const params = new URLSearchParams({ exercise_ids: exerciseIds.join(',') });
+    if (excludeWorkoutLogId) params.set('exclude_workout_log_id', excludeWorkoutLogId);
+    return apiRequestWithAuth<import('../types').LastExercisePerformance[]>(
+      `/exercise-history?${params}`
+    );
+  },
 };
 
 // Progress API

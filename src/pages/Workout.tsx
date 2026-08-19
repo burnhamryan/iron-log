@@ -1,9 +1,32 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { userProgramsApi, programsApi, workoutLogsApi, exerciseLogsApi, setLogsApi } from '../lib/api';
+import {
+  userProgramsApi,
+  programsApi,
+  workoutLogsApi,
+  exerciseLogsApi,
+  setLogsApi,
+  exerciseHistoryApi,
+} from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
+import { useRestTimer } from '../contexts/restTimerContext';
+import { type WeightUnit } from '../lib/units';
+import {
+  lastWeightIn,
+  formatLastSet,
+  formatLastDate,
+  workingSetsOf,
+  previousSetFor,
+} from '../lib/lastPerformance';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import type { UserProgram, ProgramWithBlocks, WorkoutTemplateWithExercises, TemplateExerciseWithDetails } from '../types';
+import type {
+  UserProgram,
+  ProgramWithBlocks,
+  WorkoutTemplateWithExercises,
+  TemplateExerciseWithDetails,
+  WorkoutLogWithExercises,
+  LastExercisePerformance,
+} from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
   program_name?: string;
@@ -23,46 +46,25 @@ interface ExerciseState {
   expanded: boolean;
 }
 
-function RestTimer({ seconds, onDone }: { seconds: number; onDone: () => void }) {
-  const [remaining, setRemaining] = useState(seconds);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+type LastPerformanceMap = Map<string, LastExercisePerformance>;
 
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setRemaining(prev => {
-        if (prev <= 1) {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          onDone();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [seconds, onDone]);
-
-  const mins = Math.floor(remaining / 60);
-  const secs = remaining % 60;
-  const pct = (remaining / seconds) * 100;
-
-  return (
-    <div className="fixed bottom-20 left-0 right-0 mx-4 md:mx-auto md:max-w-md z-40">
-      <div className="bg-slate-800 dark:bg-slate-700 text-white rounded-xl p-4 shadow-lg">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">Rest Timer</span>
-          <button onClick={onDone} className="text-xs text-slate-400 hover:text-white">Skip</button>
-        </div>
-        <div className="text-3xl font-bold text-center mb-2">{mins}:{secs.toString().padStart(2, '0')}</div>
-        <div className="h-1.5 bg-slate-600 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-    </div>
-  );
+function findTemplateInProgram(
+  program: ProgramWithBlocks | null,
+  templateId: string | null
+): WorkoutTemplateWithExercises | null {
+  if (!program || !templateId) return null;
+  for (const block of program.blocks || []) {
+    for (const week of block.weeks || []) {
+      const match = week.workouts?.find((w) => w.id === templateId);
+      if (match) return match;
+    }
+  }
+  return null;
 }
 
 export function Workout() {
   const { weightUnit } = useUserContext();
+  const { startRest, stopRest } = useRestTimer();
   const [loading, setLoading] = useState(true);
   const [activeProgram, setActiveProgram] = useState<UserProgramWithDetails | null>(null);
   const [programDetails, setProgramDetails] = useState<ProgramWithBlocks | null>(null);
@@ -70,16 +72,109 @@ export function Workout() {
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutTemplateWithExercises | null>(null);
   const [workoutLogId, setWorkoutLogId] = useState<string | null>(null);
   const [exerciseStates, setExerciseStates] = useState<Map<string, ExerciseState>>(new Map());
+  const [lastPerformance, setLastPerformance] = useState<LastPerformanceMap>(new Map());
   const [startingWorkout, setStartingWorkout] = useState(false);
+  const [resumed, setResumed] = useState(false);
   const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
-  const [restTimer, setRestTimer] = useState<{ seconds: number } | null>(null);
-  const dismissTimer = useCallback(() => setRestTimer(null), []);
+
+  // Read by the mount effect, which must not re-run when the unit toggle changes
+  const weightUnitRef = useRef<WeightUnit>(weightUnit);
+  useEffect(() => {
+    weightUnitRef.current = weightUnit;
+  }, [weightUnit]);
+
+  const fetchLastPerformance = useCallback(
+    async (workout: WorkoutTemplateWithExercises, excludeWorkoutLogId?: string) => {
+      const exerciseIds = Array.from(
+        new Set((workout.exercises || []).map((te) => te.exercise?.id).filter(Boolean) as string[])
+      );
+      if (exerciseIds.length === 0) return new Map() as LastPerformanceMap;
+
+      const response = await exerciseHistoryApi.getLastPerformed(exerciseIds, excludeWorkoutLogId);
+      const map: LastPerformanceMap = new Map();
+      for (const entry of response.data || []) {
+        map.set(entry.exercise_id, entry);
+      }
+      return map;
+    },
+    []
+  );
+
+  const buildExerciseStates = useCallback(
+    (
+      workout: WorkoutTemplateWithExercises,
+      history: LastPerformanceMap,
+      existingLog: WorkoutLogWithExercises | null,
+      unit: WeightUnit
+    ) => {
+      const states = new Map<string, ExerciseState>();
+
+      workout.exercises?.forEach((te) => {
+        const loggedExercise = existingLog?.exercises?.find(
+          (el) => el.template_exercise_id === te.id || el.exercise_id === te.exercise?.id
+        );
+        const loggedSets = (loggedExercise?.sets || []).filter((s) => s.set_type === 'working');
+        const previousSets = workingSetsOf(history.get(te.exercise?.id || ''));
+        const setCount = Math.max(
+          te.working_sets,
+          ...loggedSets.map((s) => s.set_number),
+          0
+        );
+
+        const sets: SetState[] = Array.from({ length: setCount }, (_, index) => {
+          const logged = loggedSets.find((s) => s.set_number === index + 1);
+          if (logged) {
+            // Stored in whichever unit was active when it was logged
+            const loggedWeight = lastWeightIn(logged, unit);
+            return {
+              weight: loggedWeight === null ? '' : String(loggedWeight),
+              reps: logged.reps_completed === null ? '' : String(logged.reps_completed),
+              logged: true,
+              setLogId: logged.id,
+            };
+          }
+          // Pre-fill with what was lifted for this set last time so the common
+          // case (same weight again) is a single tap.
+          const previous = previousSetFor(previousSets, index);
+          const previousWeight = previous ? lastWeightIn(previous, unit) : null;
+          return {
+            weight: previousWeight === null ? '' : String(previousWeight),
+            reps: '',
+            logged: false,
+          };
+        });
+
+        states.set(te.id, {
+          exerciseLogId: loggedExercise?.id ?? null,
+          sets,
+          expanded: false,
+        });
+      });
+
+      // Expand the first exercise that still has sets to log
+      const firstUnfinished =
+        workout.exercises?.find((te) => !states.get(te.id)?.sets.every((s) => s.logged)) ||
+        workout.exercises?.[0];
+      if (firstUnfinished && states.has(firstUnfinished.id)) {
+        states.get(firstUnfinished.id)!.expanded = true;
+      }
+
+      return states;
+    },
+    []
+  );
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
 
-      const programsResponse = await userProgramsApi.list();
+      const [programsResponse, inProgressResponse] = await Promise.all([
+        userProgramsApi.list(),
+        workoutLogsApi.list({ status: 'in_progress', limit: 1, include_empty: true }),
+      ]);
+
+      let details: ProgramWithBlocks | null = null;
+
       if (programsResponse.data) {
         const active = programsResponse.data.find((p: UserProgramWithDetails) => p.is_active);
         setActiveProgram(active || null);
@@ -87,10 +182,11 @@ export function Workout() {
         if (active) {
           const detailsResponse = await programsApi.get(active.program_id);
           if (detailsResponse.data) {
-            setProgramDetails(detailsResponse.data);
+            details = detailsResponse.data;
+            setProgramDetails(details);
 
-            if (active.current_week_id && detailsResponse.data.blocks) {
-              for (const block of detailsResponse.data.blocks) {
+            if (active.current_week_id && details.blocks) {
+              for (const block of details.blocks) {
                 if (block.weeks) {
                   const currentWeek = block.weeks.find(w => w.id === active.current_week_id);
                   if (currentWeek && currentWeek.workouts) {
@@ -104,32 +200,27 @@ export function Workout() {
         }
       }
 
+      // Pick back up an unfinished workout instead of silently starting a new one
+      const inProgress = inProgressResponse.data?.[0];
+      const template = findTemplateInProgram(details, inProgress?.workout_template_id ?? null);
+
+      if (inProgress && template) {
+        const fullLog = await workoutLogsApi.get(inProgress.id);
+        const history = await fetchLastPerformance(template, inProgress.id);
+        setLastPerformance(history);
+        setExerciseStates(
+          buildExerciseStates(template, history, fullLog.data ?? null, weightUnitRef.current)
+        );
+        setSelectedWorkout(template);
+        setWorkoutLogId(inProgress.id);
+        setResumed(true);
+      }
+
       setLoading(false);
     };
 
     fetchData();
-  }, []);
-
-  const initExerciseStates = (workout: WorkoutTemplateWithExercises) => {
-    const states = new Map<string, ExerciseState>();
-    workout.exercises?.forEach((te) => {
-      states.set(te.id, {
-        exerciseLogId: null,
-        sets: Array.from({ length: te.working_sets }, () => ({
-          weight: '',
-          reps: '',
-          logged: false,
-        })),
-        expanded: false,
-      });
-    });
-    // Expand the first exercise by default
-    const firstId = workout.exercises?.[0]?.id;
-    if (firstId && states.has(firstId)) {
-      states.get(firstId)!.expanded = true;
-    }
-    setExerciseStates(states);
-  };
+  }, [buildExerciseStates, fetchLastPerformance]);
 
   const handleStartWorkout = async (workout: WorkoutTemplateWithExercises) => {
     if (!activeProgram) return;
@@ -142,9 +233,12 @@ export function Workout() {
     });
 
     if (response.data) {
+      const history = await fetchLastPerformance(workout, response.data.id);
+      setLastPerformance(history);
+      setExerciseStates(buildExerciseStates(workout, history, null, weightUnit));
       setWorkoutLogId(response.data.id);
       setSelectedWorkout(workout);
-      initExerciseStates(workout);
+      setResumed(false);
     }
     setStartingWorkout(false);
   };
@@ -229,11 +323,30 @@ export function Workout() {
         return next;
       });
 
-      // Start rest timer
+      // Rest runs in the layout, so it keeps going if you leave this screen
       if (templateExercise.rest_seconds > 0) {
-        setRestTimer({ seconds: templateExercise.rest_seconds });
+        startRest(templateExercise.rest_seconds);
       }
     }
+  };
+
+  const handleUnlogSet = async (templateExerciseId: string, setIndex: number) => {
+    const state = exerciseStates.get(templateExerciseId);
+    const setLogId = state?.sets[setIndex]?.setLogId;
+    if (!setLogId) return;
+
+    const response = await setLogsApi.delete(setLogId);
+    if (response.error) return;
+
+    setExerciseStates(prev => {
+      const next = new Map(prev);
+      const es = next.get(templateExerciseId);
+      if (es) {
+        es.sets[setIndex].logged = false;
+        es.sets[setIndex].setLogId = undefined;
+      }
+      return next;
+    });
   };
 
   const updateSetField = (templateExerciseId: string, setIndex: number, field: 'weight' | 'reps', value: string) => {
@@ -267,18 +380,15 @@ export function Workout() {
     });
   };
 
-  const handleFinishWorkout = async () => {
-    if (workoutLogId) {
-      await workoutLogsApi.update(workoutLogId, {
-        completed_at: new Date().toISOString(),
-      });
-    }
+  const closeWorkout = () => {
     setSelectedWorkout(null);
     setWorkoutLogId(null);
     setExerciseStates(new Map());
+    setLastPerformance(new Map());
+    setResumed(false);
   };
 
-  const getCompletionCount = () => {
+  const getCompletionCount = useCallback(() => {
     let total = 0;
     let logged = 0;
     exerciseStates.forEach(es => {
@@ -286,6 +396,28 @@ export function Workout() {
       logged += es.sets.filter(s => s.logged).length;
     });
     return { total, logged };
+  }, [exerciseStates]);
+
+  const handleFinishWorkout = async () => {
+    const { logged } = getCompletionCount();
+
+    if (workoutLogId) {
+      if (logged === 0) {
+        // Nothing was logged - don't leave an empty session in the history
+        const discard = window.confirm(
+          'No sets were logged. Discard this workout?'
+        );
+        if (!discard) return;
+        await workoutLogsApi.delete(workoutLogId);
+      } else {
+        await workoutLogsApi.update(workoutLogId, {
+          completed_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    stopRest();
+    closeWorkout();
   };
 
   if (loading) {
@@ -304,13 +436,30 @@ export function Workout() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
-            {selectedWorkout.name}
-          </h1>
-          <span className="text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={closeWorkout}
+              className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              aria-label="Back to workout list"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate">
+              {selectedWorkout.name}
+            </h1>
+          </div>
+          <span className="text-sm text-slate-500 dark:text-slate-400 flex-shrink-0">
             {logged}/{total} sets
           </span>
         </div>
+
+        {resumed && (
+          <div className="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg px-3 py-2">
+            Picked up where you left off - your logged sets were saved.
+          </div>
+        )}
 
         {/* Progress bar */}
         <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -326,6 +475,8 @@ export function Workout() {
             const state = exerciseStates.get(templateExercise.id);
             if (!state) return null;
             const allLogged = state.sets.every(s => s.logged);
+            const history = lastPerformance.get(templateExercise.exercise?.id || '');
+            const previousSets = workingSetsOf(history);
 
             return (
               <div
@@ -362,6 +513,12 @@ export function Workout() {
                         {templateExercise.rir !== null && ` @ RIR ${templateExercise.rir}`}
                         {templateExercise.rest_seconds > 0 && ` | ${Math.round(templateExercise.rest_seconds / 60)}min rest`}
                       </p>
+                      {previousSets.length > 0 && history && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 truncate mt-0.5">
+                          Last {formatLastDate(history.workout_date)}:{' '}
+                          {previousSets.map((s) => formatLastSet(s, weightUnit)).join(', ')}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <svg
@@ -394,53 +551,72 @@ export function Workout() {
 
                     {/* Set inputs */}
                     <div className="space-y-2">
-                      {state.sets.map((setData, setIndex) => (
-                        <div
-                          key={setIndex}
-                          className={`flex items-center gap-2 p-2 rounded-lg ${
-                            setData.logged
-                              ? 'bg-green-50 dark:bg-green-900/20'
-                              : 'bg-slate-50 dark:bg-slate-700/50'
-                          }`}
-                        >
-                          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-8 text-center">
-                            S{setIndex + 1}
-                          </span>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            placeholder={weightUnit}
-                            value={setData.weight}
-                            onChange={(e) => updateSetField(templateExercise.id, setIndex, 'weight', e.target.value)}
-                            disabled={setData.logged}
-                            className="w-20 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
-                          />
-                          <span className="text-slate-400 text-xs">x</span>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            placeholder="reps"
-                            value={setData.reps}
-                            onChange={(e) => updateSetField(templateExercise.id, setIndex, 'reps', e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleLogSet(templateExercise, setIndex)}
-                            disabled={setData.logged}
-                            className="w-16 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
-                          />
-                          {setData.logged ? (
-                            <svg className="w-5 h-5 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : (
-                            <button
-                              onClick={() => handleLogSet(templateExercise, setIndex)}
-                              disabled={!setData.reps}
-                              className="ml-auto px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:dark:bg-slate-600 text-white rounded-lg transition-colors flex-shrink-0"
+                      {state.sets.map((setData, setIndex) => {
+                        const previous = previousSets[setIndex];
+                        return (
+                          <div key={setIndex} className="space-y-0.5">
+                            <div
+                              className={`flex items-center gap-2 p-2 rounded-lg ${
+                                setData.logged
+                                  ? 'bg-green-50 dark:bg-green-900/20'
+                                  : 'bg-slate-50 dark:bg-slate-700/50'
+                              }`}
                             >
-                              Log
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                              <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-8 text-center">
+                                S{setIndex + 1}
+                              </span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                placeholder={
+                                  previous && lastWeightIn(previous, weightUnit) !== null
+                                    ? String(lastWeightIn(previous, weightUnit))
+                                    : weightUnit
+                                }
+                                value={setData.weight}
+                                onChange={(e) => updateSetField(templateExercise.id, setIndex, 'weight', e.target.value)}
+                                disabled={setData.logged}
+                                className="w-20 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
+                              />
+                              <span className="text-slate-400 text-xs">x</span>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                placeholder={previous?.reps_completed ? String(previous.reps_completed) : 'reps'}
+                                value={setData.reps}
+                                onChange={(e) => updateSetField(templateExercise.id, setIndex, 'reps', e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleLogSet(templateExercise, setIndex)}
+                                disabled={setData.logged}
+                                className="w-16 px-2 py-1.5 text-sm text-center border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 disabled:opacity-50"
+                              />
+                              {setData.logged ? (
+                                <button
+                                  onClick={() => handleUnlogSet(templateExercise.id, setIndex)}
+                                  className="ml-auto px-2 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1 flex-shrink-0"
+                                >
+                                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  Undo
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleLogSet(templateExercise, setIndex)}
+                                  disabled={!setData.reps}
+                                  className="ml-auto px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:dark:bg-slate-600 text-white rounded-lg transition-colors flex-shrink-0"
+                                >
+                                  Log
+                                </button>
+                              )}
+                            </div>
+                            {previous && !setData.logged && (
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 pl-11">
+                                Last time: {formatLastSet(previous, weightUnit)}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -456,20 +632,23 @@ export function Workout() {
         >
           Finish Workout ({logged}/{total} sets logged)
         </button>
-
-        {/* Rest Timer */}
-        {restTimer && (
-          <RestTimer seconds={restTimer.seconds} onDone={dismissTimer} />
-        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-        Start Workout
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+          Start Workout
+        </h1>
+        <Link
+          to="/history"
+          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Workout history
+        </Link>
+      </div>
 
       {/* From Program Section */}
       <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">

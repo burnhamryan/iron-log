@@ -5,7 +5,11 @@ A progressive web app for tracking workouts and strength training progress.
 ## Features
 
 - **Program Management**: Import workout programs from Excel files (e.g., Jeff Nippard's Min-Max Program)
-- **Workout Tracking**: Log sets, reps, and weight for each exercise
+- **Workout Tracking**: Log sets, reps, and weight for each exercise, with last session's
+  weight and reps shown inline so you know what to beat
+- **Workout History**: Every logged session is saved and browsable, and an unfinished
+  workout picks up where you left off
+- **Rest Timer**: Keeps running when you switch screens, background the app, or reload
 - **Progress Tracking**: Monitor your strength gains over time
 - **PWA Support**: Install on mobile devices for offline access
 - **Dark Mode**: Easy on the eyes during those late-night gym sessions
@@ -81,9 +85,11 @@ iron-log/
 - `GET /api/programs/:id` - Program details with blocks/weeks/workouts
 - `POST /api/excel-import` - Import programs from Excel
 - `GET/POST /api/user-programs` - User's enrolled programs
-- `GET/POST /api/workout-logs` - Workout session logs
+- `GET/POST /api/workout-logs` - Workout session logs (supports `?status=completed|in_progress`)
+- `GET /api/workout-logs/:id` - A logged session with its exercises and sets
 - `POST /api/exercise-logs` - Exercise logs within workouts
-- `POST /api/set-logs` - Individual set logs
+- `POST/PUT/DELETE /api/set-logs` - Individual set logs
+- `GET /api/exercise-history` - Sets logged the last time each exercise was performed
 
 ## Deployment
 

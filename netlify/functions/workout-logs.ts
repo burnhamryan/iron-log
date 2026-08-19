@@ -2,6 +2,12 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
 
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers, body: '' };
@@ -43,7 +49,7 @@ const handler: Handler = async (event: HandlerEvent) => {
       if (workoutLogId && workoutLogId !== 'workout-logs') {
         // Get single workout with exercises and sets
         const workoutLogs = await sql`
-          SELECT wl.*, wt.name as workout_name
+          SELECT wl.*, wt.name as workout_name, wt.day_number
           FROM workout_logs wl
           LEFT JOIN workout_templates wt ON wl.workout_template_id = wt.id
           WHERE wl.id = ${workoutLogId} AND wl.user_id = ${userId}
@@ -83,7 +89,7 @@ const handler: Handler = async (event: HandlerEvent) => {
                 category: el.category,
                 equipment: el.equipment,
               },
-              sets,
+              sets: sets.map((set) => ({ ...set, weight_value: toNumber(set.weight_value) })),
             };
           })
         );
@@ -99,14 +105,42 @@ const handler: Handler = async (event: HandlerEvent) => {
       }
 
       // List workout logs
-      const limit = parseInt(event.queryStringParameters?.limit || '20');
-      const offset = parseInt(event.queryStringParameters?.offset || '0');
+      const params = event.queryStringParameters || {};
+      const limit = Math.min(Math.max(parseInt(params.limit || '20') || 20, 1), 100);
+      const offset = Math.max(parseInt(params.offset || '0') || 0, 0);
+      // 'all' | 'completed' | 'in_progress'
+      const status = ['completed', 'in_progress'].includes(params.status || '')
+        ? (params.status as string)
+        : 'all';
+      // Workouts that were started but never logged against are noise in history.
+      const includeEmpty = params.include_empty === 'true' ? 'true' : 'false';
 
       const workoutLogs = await sql`
-        SELECT wl.*, wt.name as workout_name
+        SELECT
+          wl.*,
+          wt.name as workout_name,
+          wt.day_number,
+          stats.exercise_count,
+          stats.set_count,
+          stats.total_volume
         FROM workout_logs wl
         LEFT JOIN workout_templates wt ON wl.workout_template_id = wt.id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(DISTINCT el.id) FILTER (WHERE sl.id IS NOT NULL) AS exercise_count,
+            COUNT(sl.id) AS set_count,
+            COALESCE(SUM(sl.weight_value * sl.reps_completed), 0) AS total_volume
+          FROM exercise_logs el
+          LEFT JOIN set_logs sl ON sl.exercise_log_id = el.id
+          WHERE el.workout_log_id = wl.id
+        ) stats ON TRUE
         WHERE wl.user_id = ${userId}
+          AND (
+            ${status} = 'all'
+            OR (${status} = 'completed' AND wl.completed_at IS NOT NULL)
+            OR (${status} = 'in_progress' AND wl.completed_at IS NULL)
+          )
+          AND (${includeEmpty}::boolean OR stats.set_count > 0)
         ORDER BY wl.workout_date DESC, wl.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
@@ -114,7 +148,14 @@ const handler: Handler = async (event: HandlerEvent) => {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify(workoutLogs),
+        body: JSON.stringify(
+          workoutLogs.map((log) => ({
+            ...log,
+            exercise_count: Number(log.exercise_count ?? 0),
+            set_count: Number(log.set_count ?? 0),
+            total_volume: toNumber(log.total_volume) ?? 0,
+          }))
+        ),
       };
     }
 
@@ -145,7 +186,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         UPDATE workout_logs
         SET
           completed_at = COALESCE(${completed_at || null}, completed_at),
-          notes = COALESCE(${notes}, notes)
+          notes = COALESCE(${notes ?? null}, notes)
         WHERE id = ${workoutLogId} AND user_id = ${userId}
         RETURNING *
       `;
