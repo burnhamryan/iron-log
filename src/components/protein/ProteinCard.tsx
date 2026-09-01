@@ -4,11 +4,11 @@ import { formatQuantity } from '../../lib/protein';
 import { AddProteinSheet } from './AddProteinSheet';
 import type { ProteinDay, ProteinQuickAdd } from '../../types';
 
-export function ProteinCard() {
+export function ProteinCard({ autoOpenAdd = false }: { autoOpenAdd?: boolean }) {
   const [day, setDay] = useState<ProteinDay | null>(null);
   const [quickAdds, setQuickAdds] = useState<ProteinQuickAdd[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showSheet, setShowSheet] = useState(false);
+  const [showSheet, setShowSheet] = useState(autoOpenAdd);
   const [pending, setPending] = useState<string | null>(null);
   const [showEntries, setShowEntries] = useState(false);
 

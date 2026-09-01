@@ -19,6 +19,15 @@ export default defineConfig({
         orientation: 'portrait',
         scope: '/',
         start_url: '/',
+        shortcuts: [
+          {
+            name: 'Log protein',
+            short_name: 'Protein',
+            description: "Add to today's protein total",
+            url: '/protein?add=1',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
         icons: [
           {
             src: 'pwa-192x192.png',

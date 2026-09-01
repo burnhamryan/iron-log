@@ -10,7 +10,8 @@ A progressive web app for tracking workouts and strength training progress.
 - **Workout History**: Every logged session is saved and browsable, and an unfinished
   workout picks up where you left off
 - **Protein Tracking**: One-tap logging against a daily goal, with a built-in food
-  lookup (weigh it) or straight grams entry (read the label)
+  lookup (weigh it) or straight grams entry (read the label). Long-press the app
+  icon for a "Log protein" shortcut straight into entry
 - **Rest Timer**: Keeps running when you switch screens, background the app, or reload
 - **Progress Tracking**: Monitor your strength gains over time
 - **PWA Support**: Install on mobile devices for offline access
