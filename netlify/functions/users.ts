@@ -88,14 +88,15 @@ const handler: Handler = async (event: HandlerEvent) => {
     // PUT - Update user
     if (event.httpMethod === 'PUT') {
       const body = JSON.parse(event.body || '{}');
-      const { first_name, last_name, preferred_unit } = body;
+      const { first_name, last_name, preferred_unit, protein_goal_grams } = body;
 
       const result = await sql`
         UPDATE users
         SET
           first_name = COALESCE(${first_name}, first_name),
           last_name = COALESCE(${last_name}, last_name),
-          preferred_unit = COALESCE(${preferred_unit}, preferred_unit)
+          preferred_unit = COALESCE(${preferred_unit}, preferred_unit),
+          protein_goal_grams = COALESCE(${protein_goal_grams ?? null}, protein_goal_grams)
         WHERE clerk_user_id = ${clerkUserId}
         RETURNING *
       `;

@@ -243,6 +243,45 @@ export const exerciseHistoryApi = {
   },
 };
 
+// Protein API
+export const proteinApi = {
+  getDay: (date?: string) =>
+    apiRequestWithAuth<import('../types').ProteinDay>(
+      `/protein${date ? `?date=${date}` : ''}`
+    ),
+  getSummary: (days = 30) =>
+    apiRequestWithAuth<import('../types').ProteinSummary>(`/protein/summary?days=${days}`),
+  getQuickAdds: (limit = 6) =>
+    apiRequestWithAuth<import('../types').ProteinQuickAdd[]>(`/protein/quick?limit=${limit}`),
+  create: (data: import('../types').CreateProteinEntryInput) =>
+    apiRequestWithAuth<import('../types').ProteinEntry>('/protein', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => apiRequestWithAuth<void>(`/protein/${id}`, { method: 'DELETE' }),
+};
+
+// Protein Foods API
+export const proteinFoodsApi = {
+  search: (query: string, limit = 25) =>
+    apiRequestWithAuth<import('../types').ProteinFood[]>(
+      `/protein-foods?q=${encodeURIComponent(query)}&limit=${limit}`
+    ),
+  create: (data: {
+    name: string;
+    serving_size: number;
+    serving_unit: string;
+    protein: number;
+    category?: string;
+  }) =>
+    apiRequestWithAuth<import('../types').ProteinFood>('/protein-foods', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequestWithAuth<void>(`/protein-foods/${id}`, { method: 'DELETE' }),
+};
+
 // Progress API
 export const progressApi = {
   getExerciseProgress: (exerciseId: string, params?: { days?: number }) => {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
 import { usersApi, workoutLogsApi, bodyWeightApi } from '../lib/api';
+import { DEFAULT_PROTEIN_GOAL } from '../lib/protein';
 
 export function Settings() {
   const { user, refreshUser } = useAuthContext();
@@ -26,6 +27,28 @@ export function Settings() {
 
     setSaving(false);
     setTimeout(() => setMessage(null), 3000);
+  };
+
+  // null means "untouched" - show whatever the server has
+  const [proteinGoalDraft, setProteinGoalDraft] = useState<string | null>(null);
+  const [savingGoal, setSavingGoal] = useState(false);
+
+  const handleSaveProteinGoal = async () => {
+    const value = parseInt(proteinGoal, 10);
+    if (!Number.isFinite(value) || value <= 0 || value > 1000) {
+      setMessage({ type: 'error', text: 'Enter a daily protein goal between 1 and 1000g' });
+      return;
+    }
+    setSavingGoal(true);
+    const response = await usersApi.update({ protein_goal_grams: value });
+    if (response.error) {
+      setMessage({ type: 'error', text: response.error });
+    } else {
+      await refreshUser();
+      setProteinGoalDraft(null);
+      setMessage({ type: 'success', text: `Protein goal set to ${value}g` });
+    }
+    setSavingGoal(false);
   };
 
   const handleExportData = async () => {
@@ -62,6 +85,9 @@ export function Settings() {
     setExporting(false);
     setTimeout(() => setMessage(null), 3000);
   };
+
+  const proteinGoal =
+    proteinGoalDraft ?? String(user?.protein_goal_grams ?? DEFAULT_PROTEIN_GOAL);
 
   return (
     <div className="space-y-6">
@@ -103,6 +129,31 @@ export function Settings() {
                 : '-'}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Protein Goal */}
+      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">
+          Daily Protein Goal
+        </h2>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            inputMode="numeric"
+            value={proteinGoal}
+            onChange={(e) => setProteinGoalDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSaveProteinGoal()}
+            className="w-28 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+          />
+          <span className="text-slate-600 dark:text-slate-400 text-sm">grams per day</span>
+          <button
+            onClick={handleSaveProteinGoal}
+            disabled={savingGoal}
+            className="ml-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+          >
+            {savingGoal ? 'Saving...' : 'Save'}
+          </button>
         </div>
       </div>
 

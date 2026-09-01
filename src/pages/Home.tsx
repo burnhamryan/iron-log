@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
 import { userProgramsApi, bodyWeightApi, workoutLogsApi } from '../lib/api';
+import { ProteinCard } from '../components/protein/ProteinCard';
 import type { UserProgram, WorkoutLogSummary } from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
@@ -113,6 +114,9 @@ export function Home() {
           <span className="font-semibold">View Progress</span>
         </Link>
       </div>
+
+      {/* Protein */}
+      <ProteinCard />
 
       {/* Current Program Card */}
       <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-sm">

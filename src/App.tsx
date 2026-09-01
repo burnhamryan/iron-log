@@ -10,6 +10,7 @@ import { Programs } from './pages/Programs';
 import { ProgramDetail } from './pages/ProgramDetail';
 import { Workout } from './pages/Workout';
 import { Progress } from './pages/Progress';
+import { Protein } from './pages/Protein';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 
@@ -39,6 +40,7 @@ function App() {
                   <Route path="/programs/:id" element={<ProgramDetail />} />
                   <Route path="/workout" element={<Workout />} />
                   <Route path="/progress" element={<Progress />} />
+                  <Route path="/protein" element={<Protein />} />
                   <Route path="/history" element={<History />} />
                   <Route path="/settings" element={<Settings />} />
                 </Route>

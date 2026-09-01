@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { BUILT_IN_FOODS } from './lib/proteinFoods';
 
 let dbInitialized = false;
 
@@ -236,6 +237,78 @@ export async function initDb() {
   `;
 
   await sql`CREATE INDEX IF NOT EXISTS idx_set_logs_exercise ON set_logs(exercise_log_id)`;
+
+  // Protein tracking -------------------------------------------------------
+
+  // Daily protein target lives with the user; 200g is the working default.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS protein_goal_grams INTEGER DEFAULT 200`;
+
+  // Lookup table: built-in foods have created_by NULL, a user's own foods
+  // carry their id.
+  await sql`
+    CREATE TABLE IF NOT EXISTS protein_foods (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      serving_size DECIMAL(10, 2) NOT NULL,
+      serving_unit TEXT NOT NULL,
+      protein DECIMAL(10, 2) NOT NULL,
+      category TEXT,
+      created_by UUID REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_protein_foods_builtin
+    ON protein_foods (lower(name)) WHERE created_by IS NULL
+  `;
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_protein_foods_custom
+    ON protein_foods (created_by, lower(name)) WHERE created_by IS NOT NULL
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_protein_foods_name ON protein_foods (lower(name))`;
+
+  // One row per thing eaten; the day's intake is their sum.
+  await sql`
+    CREATE TABLE IF NOT EXISTS protein_entries (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      logged_at DATE NOT NULL DEFAULT CURRENT_DATE,
+      grams DECIMAL(6, 2) NOT NULL,
+      label TEXT NOT NULL,
+      food_id UUID REFERENCES protein_foods(id) ON DELETE SET NULL,
+      quantity DECIMAL(10, 2),
+      quantity_unit TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_protein_entries_user_date
+    ON protein_entries (user_id, logged_at DESC)
+  `;
+
+  // Seed the built-in foods once
+  const [{ count }] = await sql`
+    SELECT COUNT(*)::int AS count FROM protein_foods WHERE created_by IS NULL
+  `;
+  if (count === 0) {
+    const rows = BUILT_IN_FOODS.map((food) => ({
+      name: food.name,
+      serving_size: food.servingSize,
+      serving_unit: food.servingUnit,
+      protein: food.protein,
+      category: food.category,
+    }));
+
+    await sql`
+      INSERT INTO protein_foods (name, serving_size, serving_unit, protein, category)
+      SELECT f.name, f.serving_size, f.serving_unit, f.protein, f.category
+      FROM json_to_recordset(${JSON.stringify(rows)}::json)
+        AS f(name text, serving_size numeric, serving_unit text, protein numeric, category text)
+      ON CONFLICT DO NOTHING
+    `;
+  }
 
   dbInitialized = true;
 }
