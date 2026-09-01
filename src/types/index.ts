@@ -6,6 +6,7 @@ export interface User {
   first_name: string | null;
   last_name: string | null;
   preferred_unit: 'imperial' | 'metric';
+  protein_goal_grams: number | null;
   created_at: string;
 }
 
@@ -198,6 +199,59 @@ export interface LastExercisePerformance {
   workout_log_id: string;
   workout_date: string;
   sets: LastPerformedSet[];
+}
+
+// Protein tracking
+export interface ProteinFood {
+  id: string;
+  name: string;
+  serving_size: number;
+  serving_unit: string;
+  protein: number;
+  category: string | null;
+  created_by: string | null;
+  is_custom: boolean;
+}
+
+export interface ProteinEntry {
+  id: string;
+  logged_at: string;
+  grams: number;
+  label: string;
+  food_id: string | null;
+  quantity: number | null;
+  quantity_unit: string | null;
+  created_at: string;
+}
+
+export interface ProteinDay {
+  date: string;
+  goal_grams: number;
+  total_grams: number;
+  entries: ProteinEntry[];
+}
+
+export interface ProteinQuickAdd {
+  label: string;
+  food_id: string | null;
+  quantity: number | null;
+  quantity_unit: string | null;
+  grams: number;
+  uses: number;
+}
+
+export interface ProteinSummary {
+  goal_grams: number;
+  days: { date: string; total_grams: number; entry_count: number }[];
+}
+
+export interface CreateProteinEntryInput {
+  grams?: number;
+  label?: string;
+  food_id?: string;
+  quantity?: number;
+  quantity_unit?: string;
+  logged_at?: string;
 }
 
 // Progress tracking

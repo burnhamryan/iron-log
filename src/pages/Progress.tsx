@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { exercisesApi, progressApi, bodyWeightApi } from '../lib/api';
-import type { Exercise, ExerciseProgress, BodyWeightLog } from '../types';
+import { exercisesApi, progressApi, bodyWeightApi, proteinApi } from '../lib/api';
+import type { Exercise, ExerciseProgress, BodyWeightLog, ProteinSummary } from '../types';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ProteinTab } from '../components/protein/ProteinTab';
 import { useUserContext } from '../contexts/UserContext';
 import {
   LineChart,
@@ -22,14 +23,16 @@ export function Progress() {
   const [loading, setLoading] = useState(true);
   const [progressLoading, setProgressLoading] = useState(false);
   const [progressError, setProgressError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'exercises' | 'bodyweight'>('exercises');
+  const [activeTab, setActiveTab] = useState<'exercises' | 'bodyweight' | 'protein'>('exercises');
+  const [proteinSummary, setProteinSummary] = useState<ProteinSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
-      const [exercisesRes, bodyWeightRes] = await Promise.all([
+      const [exercisesRes, bodyWeightRes, proteinRes] = await Promise.all([
         exercisesApi.list(),
         bodyWeightApi.list({ limit: 30 }),
+        proteinApi.getSummary(30),
       ]);
 
       if (exercisesRes.data) {
@@ -37,6 +40,9 @@ export function Progress() {
       }
       if (bodyWeightRes.data) {
         setBodyWeightLogs(bodyWeightRes.data);
+      }
+      if (proteinRes.data) {
+        setProteinSummary(proteinRes.data);
       }
       setLoading(false);
     };
@@ -99,9 +105,21 @@ export function Progress() {
         >
           Body Weight
         </button>
+        <button
+          onClick={() => setActiveTab('protein')}
+          className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'protein'
+              ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          Protein
+        </button>
       </div>
 
-      {activeTab === 'exercises' ? (
+      {activeTab === 'protein' ? (
+        <ProteinTab summary={proteinSummary} />
+      ) : activeTab === 'exercises' ? (
         <div className="space-y-6">
           {/* Exercise Selector */}
           <div className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm">

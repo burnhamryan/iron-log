@@ -9,6 +9,8 @@ A progressive web app for tracking workouts and strength training progress.
   weight and reps shown inline so you know what to beat
 - **Workout History**: Every logged session is saved and browsable, and an unfinished
   workout picks up where you left off
+- **Protein Tracking**: One-tap logging against a daily goal, with a built-in food
+  lookup (weigh it) or straight grams entry (read the label)
 - **Rest Timer**: Keeps running when you switch screens, background the app, or reload
 - **Progress Tracking**: Monitor your strength gains over time
 - **PWA Support**: Install on mobile devices for offline access
@@ -90,6 +92,8 @@ iron-log/
 - `POST /api/exercise-logs` - Exercise logs within workouts
 - `POST/PUT/DELETE /api/set-logs` - Individual set logs
 - `GET /api/exercise-history` - Sets logged the last time each exercise was performed
+- `GET/POST/DELETE /api/protein` - Protein entries, plus `/summary` and `/quick`
+- `GET/POST/DELETE /api/protein-foods` - Food lookup table and your own saved foods
 
 ## Deployment
 
