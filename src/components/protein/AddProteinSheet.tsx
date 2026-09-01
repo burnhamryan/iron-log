@@ -33,9 +33,14 @@ export function AddProteinSheet({ onClose, onAdded }: Props) {
     searchRef.current?.focus();
   }, []);
 
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   const runSearch = useCallback(async (term: string) => {
     setSearching(true);
     const response = await proteinFoodsApi.search(term, 25);
+    // Distinguish "nothing matched" from "the lookup failed" - showing the
+    // former for both hides real breakage.
+    setSearchError(response.error ?? null);
     setResults(response.data || []);
     setSearching(false);
   }, []);
@@ -219,9 +224,23 @@ export function AddProteinSheet({ onClose, onAdded }: Props) {
             />
             {searching ? (
               <div className="flex justify-center py-6"><LoadingSpinner size="sm" /></div>
+            ) : searchError ? (
+              <div className="py-6 text-center space-y-2">
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  Food lookup failed: {searchError}
+                </p>
+                <button
+                  onClick={() => runSearch(query)}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Try again
+                </button>
+              </div>
             ) : results.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-6">
-                No foods matched. Use "Type grams" for anything with a label.
+                {query
+                  ? `Nothing matched "${query}". Use "Type grams" for anything with a label.`
+                  : 'Start typing to search foods.'}
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-slate-700">

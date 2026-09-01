@@ -10,6 +10,7 @@ export function ProteinCard({ autoOpenAdd = false }: { autoOpenAdd?: boolean }) 
   const [loading, setLoading] = useState(true);
   const [showSheet, setShowSheet] = useState(autoOpenAdd);
   const [pending, setPending] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showEntries, setShowEntries] = useState(false);
 
   const fetchState = useCallback(async () => {
@@ -17,13 +18,18 @@ export function ProteinCard({ autoOpenAdd = false }: { autoOpenAdd?: boolean }) 
       proteinApi.getDay(),
       proteinApi.getQuickAdds(6),
     ]);
-    return { day: dayRes.data ?? null, quickAdds: quickRes.data ?? [] };
+    return {
+      day: dayRes.data ?? null,
+      quickAdds: quickRes.data ?? [],
+      error: dayRes.error ?? null,
+    };
   }, []);
 
   const load = useCallback(async () => {
     const next = await fetchState();
     setDay(next.day);
     setQuickAdds(next.quickAdds);
+    setLoadError(next.error);
   }, [fetchState]);
 
   useEffect(() => {
@@ -33,6 +39,7 @@ export function ProteinCard({ autoOpenAdd = false }: { autoOpenAdd?: boolean }) 
       if (cancelled) return;
       setDay(next.day);
       setQuickAdds(next.quickAdds);
+      setLoadError(next.error);
       setLoading(false);
     };
     run();
@@ -113,6 +120,12 @@ export function ProteinCard({ autoOpenAdd = false }: { autoOpenAdd?: boolean }) 
             </button>
           ))}
         </div>
+      )}
+
+      {loadError && (
+        <p className="text-xs text-red-600 dark:text-red-400 mb-3">
+          Couldn&apos;t load today&apos;s protein: {loadError}
+        </p>
       )}
 
       <button

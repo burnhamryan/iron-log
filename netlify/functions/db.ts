@@ -3,6 +3,31 @@ import { BUILT_IN_FOODS } from './lib/proteinFoods';
 
 let dbInitialized = false;
 
+/**
+ * Bump when a statement is added to createSchema(). The marker row lets a warm
+ * database skip the whole bootstrap in two round trips instead of ~40.
+ */
+const SCHEMA_VERSION = 1;
+
+/**
+ * `CREATE ... IF NOT EXISTS` is not atomic in Postgres: two functions cold
+ * starting at once can both pass the existence check, and the loser errors.
+ * That stayed invisible while every table already existed - it bites the first
+ * time new tables ship and several endpoints are called together. Swallow only
+ * that specific collision; anything else is a real failure.
+ */
+async function ddl(statement: Promise<unknown>): Promise<void> {
+  try {
+    await statement;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/already exists|duplicate key value|tuple concurrently updated/i.test(message)) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export function getDb() {
   const databaseUrl = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -11,13 +36,17 @@ export function getDb() {
   return neon(databaseUrl);
 }
 
-export async function initDb() {
-  if (dbInitialized) return;
-
-  const sql = getDb();
+async function createSchema(sql: ReturnType<typeof getDb>) {
+  await ddl(sql`
+    CREATE TABLE IF NOT EXISTS schema_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      version INTEGER NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
   // Users table
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       clerk_user_id TEXT UNIQUE NOT NULL,
@@ -27,12 +56,12 @@ export async function initDb() {
       preferred_unit TEXT DEFAULT 'imperial' CHECK (preferred_unit IN ('imperial', 'metric')),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_user_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_user_id)`);
 
   // Body weight tracking
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS body_weight_logs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -43,12 +72,12 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, logged_at)
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_body_weight_user_id ON body_weight_logs(user_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_body_weight_user_id ON body_weight_logs(user_id)`);
 
   // Programs
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS programs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
@@ -59,10 +88,10 @@ export async function initDb() {
       is_template BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
   // Program blocks
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS program_blocks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       program_id UUID NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
@@ -72,12 +101,12 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(program_id, block_number)
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_program_blocks_program_id ON program_blocks(program_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_program_blocks_program_id ON program_blocks(program_id)`);
 
   // Block weeks
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS block_weeks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       block_id UUID NOT NULL REFERENCES program_blocks(id) ON DELETE CASCADE,
@@ -88,12 +117,12 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(block_id, week_number)
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_block_weeks_block_id ON block_weeks(block_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_block_weeks_block_id ON block_weeks(block_id)`);
 
   // Workout templates
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS workout_templates (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       week_id UUID NOT NULL REFERENCES block_weeks(id) ON DELETE CASCADE,
@@ -104,12 +133,12 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(week_id, day_number)
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_workout_templates_week_id ON workout_templates(week_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_workout_templates_week_id ON workout_templates(week_id)`);
 
   // Exercise library
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS exercises (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL UNIQUE,
@@ -118,13 +147,13 @@ export async function initDb() {
       description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_exercises_category ON exercises(category)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_exercises_name ON exercises(name)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_exercises_category ON exercises(category)`);
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_exercises_name ON exercises(name)`);
 
   // Exercise substitutions
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS exercise_substitutions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       primary_exercise_id UUID NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
@@ -133,10 +162,10 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(primary_exercise_id, substitute_exercise_id)
     )
-  `;
+  `);
 
   // Template exercises
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS template_exercises (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       workout_template_id UUID NOT NULL REFERENCES workout_templates(id) ON DELETE CASCADE,
@@ -151,12 +180,12 @@ export async function initDb() {
       notes TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_template_exercises_template ON template_exercises(workout_template_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_template_exercises_template ON template_exercises(workout_template_id)`);
 
   // User programs
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS user_programs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -168,13 +197,13 @@ export async function initDb() {
       current_week_id UUID REFERENCES block_weeks(id),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_user_programs_user_id ON user_programs(user_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_user_programs_active ON user_programs(is_active)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_user_programs_user_id ON user_programs(user_id)`);
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_user_programs_active ON user_programs(is_active)`);
 
   // User schedules
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS user_schedules (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -183,12 +212,12 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, day_of_week)
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_user_schedules_user_id ON user_schedules(user_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_user_schedules_user_id ON user_schedules(user_id)`);
 
   // Workout logs
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS workout_logs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -200,13 +229,13 @@ export async function initDb() {
       notes TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_workout_logs_user_id ON workout_logs(user_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_workout_logs_date ON workout_logs(workout_date)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_workout_logs_user_id ON workout_logs(user_id)`);
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_workout_logs_date ON workout_logs(workout_date)`);
 
   // Exercise logs
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS exercise_logs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       workout_log_id UUID NOT NULL REFERENCES workout_logs(id) ON DELETE CASCADE,
@@ -215,13 +244,13 @@ export async function initDb() {
       exercise_order INTEGER NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_exercise_logs_workout ON exercise_logs(workout_log_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_exercise_logs_exercise ON exercise_logs(exercise_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_exercise_logs_workout ON exercise_logs(workout_log_id)`);
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_exercise_logs_exercise ON exercise_logs(exercise_id)`);
 
   // Set logs
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS set_logs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       exercise_log_id UUID NOT NULL REFERENCES exercise_logs(id) ON DELETE CASCADE,
@@ -234,18 +263,18 @@ export async function initDb() {
       is_pr BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`CREATE INDEX IF NOT EXISTS idx_set_logs_exercise ON set_logs(exercise_log_id)`;
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_set_logs_exercise ON set_logs(exercise_log_id)`);
 
   // Protein tracking -------------------------------------------------------
 
   // Daily protein target lives with the user; 200g is the working default.
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS protein_goal_grams INTEGER DEFAULT 200`;
+  await ddl(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS protein_goal_grams INTEGER DEFAULT 200`);
 
   // Lookup table: built-in foods have created_by NULL, a user's own foods
   // carry their id.
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS protein_foods (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
@@ -256,20 +285,20 @@ export async function initDb() {
       created_by UUID REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`
+  await ddl(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_protein_foods_builtin
     ON protein_foods (lower(name)) WHERE created_by IS NULL
-  `;
-  await sql`
+  `);
+  await ddl(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_protein_foods_custom
     ON protein_foods (created_by, lower(name)) WHERE created_by IS NOT NULL
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS idx_protein_foods_name ON protein_foods (lower(name))`;
+  `);
+  await ddl(sql`CREATE INDEX IF NOT EXISTS idx_protein_foods_name ON protein_foods (lower(name))`);
 
   // One row per thing eaten; the day's intake is their sum.
-  await sql`
+  await ddl(sql`
     CREATE TABLE IF NOT EXISTS protein_entries (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -281,35 +310,57 @@ export async function initDb() {
       quantity_unit TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `;
+  `);
 
-  await sql`
+  await ddl(sql`
     CREATE INDEX IF NOT EXISTS idx_protein_entries_user_date
     ON protein_entries (user_id, logged_at DESC)
+  `);
+
+  // Seed the built-in foods. Idempotent, so a half-finished previous run
+  // repairs itself rather than leaving the lookup permanently empty.
+  const rows = BUILT_IN_FOODS.map((food) => ({
+    name: food.name,
+    serving_size: food.servingSize,
+    serving_unit: food.servingUnit,
+    protein: food.protein,
+    category: food.category,
+  }));
+
+  await sql`
+    INSERT INTO protein_foods (name, serving_size, serving_unit, protein, category)
+    SELECT f.name, f.serving_size, f.serving_unit, f.protein, f.category
+    FROM json_to_recordset(${JSON.stringify(rows)}::json)
+      AS f(name text, serving_size numeric, serving_unit text, protein numeric, category text)
+    ON CONFLICT DO NOTHING
   `;
 
-  // Seed the built-in foods once
-  const [{ count }] = await sql`
-    SELECT COUNT(*)::int AS count FROM protein_foods WHERE created_by IS NULL
+  // Recorded last, so a failure part-way through is retried next time
+  await sql`
+    INSERT INTO schema_state (id, version) VALUES (true, ${SCHEMA_VERSION})
+    ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, updated_at = NOW()
   `;
-  if (count === 0) {
-    const rows = BUILT_IN_FOODS.map((food) => ({
-      name: food.name,
-      serving_size: food.servingSize,
-      serving_unit: food.servingUnit,
-      protein: food.protein,
-      category: food.category,
-    }));
+}
 
-    await sql`
-      INSERT INTO protein_foods (name, serving_size, serving_unit, protein, category)
-      SELECT f.name, f.serving_size, f.serving_unit, f.protein, f.category
-      FROM json_to_recordset(${JSON.stringify(rows)}::json)
-        AS f(name text, serving_size numeric, serving_unit text, protein numeric, category text)
-      ON CONFLICT DO NOTHING
-    `;
+/** Cheap check so a warm database skips the bootstrap entirely. */
+async function schemaIsCurrent(sql: ReturnType<typeof getDb>): Promise<boolean> {
+  const [marker] = await sql`SELECT to_regclass('schema_state') AS present`;
+  if (!marker?.present) return false;
+  const [state] = await sql`SELECT version FROM schema_state LIMIT 1`;
+  return state !== undefined && Number(state.version) >= SCHEMA_VERSION;
+}
+
+export async function initDb() {
+  if (dbInitialized) return;
+
+  const sql = getDb();
+
+  if (await schemaIsCurrent(sql)) {
+    dbInitialized = true;
+    return;
   }
 
+  await createSchema(sql);
   dbInitialized = true;
 }
 
