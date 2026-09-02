@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
+import { todayIn, daysBefore } from '../../src/lib/dates';
 
 const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -33,7 +34,7 @@ const handler: Handler = async (event: HandlerEvent) => {
     const clerkUserId = authResult.clerkUserId;
 
     // Get user
-    const users = await sql`SELECT id FROM users WHERE clerk_user_id = ${clerkUserId}`;
+    const users = await sql`SELECT id, timezone FROM users WHERE clerk_user_id = ${clerkUserId}`;
     if (users.length === 0) {
       return {
         statusCode: 404,
@@ -59,8 +60,7 @@ const handler: Handler = async (event: HandlerEvent) => {
       }
 
       const days = parseInt(event.queryStringParameters?.days || '90');
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
+      const startDate = daysBefore(todayIn(users[0].timezone), days);
 
       // Get progress data for the exercise
       const progress = await sql`
@@ -83,7 +83,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         JOIN set_logs sl ON el.id = sl.exercise_log_id
         WHERE wl.user_id = ${userId}
           AND el.exercise_id = ${exerciseId}
-          AND wl.workout_date >= ${startDate.toISOString().split('T')[0]}
+          AND wl.workout_date >= ${startDate}::date
           AND sl.set_type = 'working'
         GROUP BY wl.id, wl.workout_date
         ORDER BY wl.workout_date ASC

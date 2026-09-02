@@ -9,29 +9,22 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts';
+import { localToday, daysBefore, formatDateOnly } from '../../lib/dates';
 import type { ProteinSummary } from '../../types';
 
 const DAYS = 30;
 
-function isoDate(value: string | Date): string {
-  return typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10);
-}
-
 /** A continuous run of days, so unlogged days show as gaps rather than closing up. */
 function buildSeries(summary: ProteinSummary) {
-  const byDate = new Map(summary.days.map((day) => [isoDate(day.date), Number(day.total_grams)]));
-  const series: { date: string; grams: number; logged: boolean }[] = [];
+  const byDate = new Map(
+    summary.days.map((day) => [String(day.date).slice(0, 10), Number(day.total_grams)])
+  );
+  const today = localToday();
 
-  const cursor = new Date();
-  cursor.setHours(0, 0, 0, 0);
-  cursor.setDate(cursor.getDate() - (DAYS - 1));
-
-  for (let i = 0; i < DAYS; i++) {
-    const key = isoDate(cursor);
-    series.push({ date: key, grams: byDate.get(key) ?? 0, logged: byDate.has(key) });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return series;
+  return Array.from({ length: DAYS }, (_, i) => {
+    const date = daysBefore(today, DAYS - 1 - i);
+    return { date, grams: byDate.get(date) ?? 0, logged: byDate.has(date) };
+  });
 }
 
 function StatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -120,10 +113,7 @@ export function ProteinTab({ summary }: { summary: ProteinSummary | null }) {
                 tick={{ fill: '#9CA3AF', fontSize: 11 }}
                 interval={6}
                 tickFormatter={(value) =>
-                  new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                  })
+                  formatDateOnly(value, { month: 'short', day: 'numeric' })
                 }
               />
               <YAxis
@@ -135,7 +125,7 @@ export function ProteinTab({ summary }: { summary: ProteinSummary | null }) {
                 contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px' }}
                 labelStyle={{ color: '#F3F4F6' }}
                 cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
-                labelFormatter={(value) => new Date(`${value}T00:00:00`).toLocaleDateString()}
+                labelFormatter={(value) => formatDateOnly(value)}
                 formatter={(value: number, _name, item) => [
                   item?.payload?.logged ? `${value}g` : 'not logged',
                   'Protein',

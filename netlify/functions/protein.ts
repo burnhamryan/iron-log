@@ -2,6 +2,7 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
 import { proteinGramsFor, DEFAULT_PROTEIN_GOAL } from '../../src/lib/protein';
+import { todayIn, daysBefore } from '../../src/lib/dates';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -31,7 +32,7 @@ const handler: Handler = async (event: HandlerEvent) => {
     }
 
     const users = await sql`
-      SELECT id, COALESCE(protein_goal_grams, ${DEFAULT_PROTEIN_GOAL}) AS protein_goal_grams
+      SELECT id, COALESCE(protein_goal_grams, ${DEFAULT_PROTEIN_GOAL}) AS protein_goal_grams, timezone
       FROM users WHERE clerk_user_id = ${authResult.clerkUserId}
     `;
     if (users.length === 0) {
@@ -39,6 +40,8 @@ const handler: Handler = async (event: HandlerEvent) => {
     }
     const userId = users[0].id;
     const goalGrams = Number(users[0].protein_goal_grams);
+    // The user's day, not the server's - functions and Neon both run in UTC
+    const today = todayIn(users[0].timezone);
 
     const pathParts = event.path.split('/').filter(Boolean);
     const tail = pathParts.length > 1 ? pathParts[pathParts.length - 1] : null;
@@ -49,7 +52,8 @@ const handler: Handler = async (event: HandlerEvent) => {
         SELECT logged_at AS date, SUM(grams) AS total_grams, COUNT(*)::int AS entry_count
         FROM protein_entries
         WHERE user_id = ${userId}
-          AND logged_at >= CURRENT_DATE - ${days}::int
+          AND logged_at >= ${daysBefore(today, days)}::date
+          AND logged_at <= ${today}::date
         GROUP BY logged_at
         ORDER BY logged_at
       `;
@@ -77,7 +81,7 @@ const handler: Handler = async (event: HandlerEvent) => {
                MAX(created_at) AS last_used
         FROM protein_entries
         WHERE user_id = ${userId}
-          AND logged_at >= CURRENT_DATE - 30
+          AND logged_at >= ${daysBefore(today, 30)}::date
         GROUP BY label, food_id, quantity, quantity_unit
         ORDER BY uses DESC, last_used DESC
         LIMIT ${limit}
@@ -106,7 +110,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         SELECT id, logged_at, grams, label, food_id, quantity, quantity_unit, created_at
         FROM protein_entries
         WHERE user_id = ${userId}
-          AND logged_at = COALESCE(${date}::date, CURRENT_DATE)
+          AND logged_at = ${date ?? today}::date
         ORDER BY created_at
       `;
 
@@ -116,7 +120,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          date: date ?? new Date().toISOString().split('T')[0],
+          date: date ?? today,
           goal_grams: goalGrams,
           total_grams: Math.round(total * 10) / 10,
           entries: entries.map((entry) => ({
@@ -190,7 +194,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         INSERT INTO protein_entries (user_id, logged_at, grams, label, food_id, quantity, quantity_unit)
         VALUES (
           ${userId},
-          COALESCE(${date}::date, CURRENT_DATE),
+          ${date ?? today}::date,
           ${grams},
           ${label},
           ${food_id || null},

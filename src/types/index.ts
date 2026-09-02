@@ -7,6 +7,7 @@ export interface User {
   last_name: string | null;
   preferred_unit: 'imperial' | 'metric';
   protein_goal_grams: number | null;
+  timezone: string | null;
   created_at: string;
 }
 

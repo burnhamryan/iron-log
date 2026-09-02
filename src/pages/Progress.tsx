@@ -4,6 +4,7 @@ import type { Exercise, ExerciseProgress, BodyWeightLog, ProteinSummary } from '
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ProteinTab } from '../components/protein/ProteinTab';
 import { useUserContext } from '../contexts/UserContext';
+import { formatDateOnly } from '../lib/dates';
 import {
   LineChart,
   Line,
@@ -171,7 +172,7 @@ export function Progress() {
                         dataKey="date"
                         stroke="#9CA3AF"
                         tick={{ fill: '#9CA3AF', fontSize: 12 }}
-                        tickFormatter={(value) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        tickFormatter={(value) => formatDateOnly(value, { month: 'short', day: 'numeric' })}
                       />
                       <YAxis
                         stroke="#9CA3AF"
@@ -190,7 +191,7 @@ export function Progress() {
                           borderRadius: '8px',
                         }}
                         labelStyle={{ color: '#F3F4F6' }}
-                        labelFormatter={(value) => new Date(value).toLocaleDateString()}
+                        labelFormatter={(value) => formatDateOnly(value)}
                       />
                       <Line
                         type="monotone"
@@ -247,7 +248,7 @@ export function Progress() {
                     .slice()
                     .reverse()
                     .map((log) => ({
-                      date: new Date(log.logged_at).toLocaleDateString(),
+                      date: formatDateOnly(log.logged_at),
                       weight: log.weight_value,
                     }))}
                 >

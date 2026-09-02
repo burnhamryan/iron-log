@@ -1,5 +1,6 @@
 // Helpers for showing what was lifted the last time an exercise was performed.
 import { convertWeight, type WeightUnit } from './units';
+import { formatDateOnly } from './dates';
 import type { LastExercisePerformance, LastPerformedSet } from '../types';
 
 /** Weight as entered last time, expressed in the unit the user is currently using. */
@@ -15,10 +16,7 @@ export function formatLastSet(set: LastPerformedSet, unit: WeightUnit): string {
 }
 
 export function formatLastDate(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
+  return formatDateOnly(date, { month: 'short', day: 'numeric' });
 }
 
 /** Working sets only - warmups aren't matched against the prescription. */

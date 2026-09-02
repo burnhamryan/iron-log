@@ -7,7 +7,7 @@ let dbInitialized = false;
  * Bump when a statement is added to createSchema(). The marker row lets a warm
  * database skip the whole bootstrap in two round trips instead of ~40.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /**
  * `CREATE ... IF NOT EXISTS` is not atomic in Postgres: two functions cold
@@ -268,6 +268,9 @@ async function createSchema(sql: ReturnType<typeof getDb>) {
   await ddl(sql`CREATE INDEX IF NOT EXISTS idx_set_logs_exercise ON set_logs(exercise_log_id)`);
 
   // Protein tracking -------------------------------------------------------
+
+  // The user's IANA zone, so "today" means their day rather than UTC's.
+  await ddl(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT`);
 
   // Daily protein target lives with the user; 200g is the working default.
   await ddl(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS protein_goal_grams INTEGER DEFAULT 200`);

@@ -3,13 +3,14 @@ import { Link } from 'react-router-dom';
 import { workoutLogsApi } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
 import { convertWeight, type WeightUnit } from '../lib/units';
+import { formatDateOnly } from '../lib/dates';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import type { WorkoutLogSummary, WorkoutLogWithExercises, SetLog } from '../types';
 
 const PAGE_SIZE = 20;
 
 function formatDate(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+  return formatDateOnly(date, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',

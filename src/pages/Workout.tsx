@@ -9,6 +9,7 @@ import {
   exerciseHistoryApi,
 } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
+import { localToday } from '../lib/dates';
 import { useRestTimer } from '../contexts/restTimerContext';
 import { type WeightUnit } from '../lib/units';
 import {
@@ -229,7 +230,7 @@ export function Workout() {
     const response = await workoutLogsApi.create({
       user_program_id: activeProgram.id,
       workout_template_id: workout.id,
-      workout_date: new Date().toISOString().split('T')[0],
+      workout_date: localToday(),
     });
 
     if (response.data) {

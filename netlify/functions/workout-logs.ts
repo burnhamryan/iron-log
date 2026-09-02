@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
+import { todayIn } from '../../src/lib/dates';
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -31,7 +32,7 @@ const handler: Handler = async (event: HandlerEvent) => {
     const clerkUserId = authResult.clerkUserId;
 
     // Get user
-    const users = await sql`SELECT id FROM users WHERE clerk_user_id = ${clerkUserId}`;
+    const users = await sql`SELECT id, timezone FROM users WHERE clerk_user_id = ${clerkUserId}`;
     if (users.length === 0) {
       return {
         statusCode: 404,
@@ -40,6 +41,7 @@ const handler: Handler = async (event: HandlerEvent) => {
       };
     }
     const userId = users[0].id;
+    const today = todayIn(users[0].timezone);
 
     const pathParts = event.path.split('/').filter(Boolean);
     const workoutLogId = pathParts.length > 1 ? pathParts[pathParts.length - 1] : null;
@@ -166,7 +168,7 @@ const handler: Handler = async (event: HandlerEvent) => {
 
       const [workoutLog] = await sql`
         INSERT INTO workout_logs (user_id, user_program_id, workout_template_id, workout_date, started_at, notes)
-        VALUES (${userId}, ${user_program_id || null}, ${workout_template_id || null}, ${workout_date || new Date().toISOString().split('T')[0]}, NOW(), ${notes || null})
+        VALUES (${userId}, ${user_program_id || null}, ${workout_template_id || null}, ${workout_date || today}, NOW(), ${notes || null})
         RETURNING *
       `;
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useUser, useAuth } from '@clerk/clerk-react';
 import { usersApi, setAuthTokenGetter } from '../lib/api';
+import { browserTimeZone } from '../lib/dates';
 import type { User } from '../types';
 
 interface AuthContextType {
@@ -35,6 +36,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenGetterReady(true);
   }, [isSignedIn, getToken]);
 
+  /**
+   * Keep the stored zone matching the device, so the API dates a workout by the
+   * user's day rather than UTC's. Also picks up travel automatically.
+   */
+  const syncTimeZone = async (current: User): Promise<User> => {
+    const detected = browserTimeZone();
+    if (!detected || current.timezone === detected) return current;
+    const updated = await usersApi.update({ timezone: detected });
+    return updated.data ?? current;
+  };
+
   const fetchOrCreateUser = async () => {
     if (!isSignedIn || !clerkUser) {
       setUser(null);
@@ -46,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await usersApi.get();
 
       if (response.data) {
-        setUser(response.data);
+        setUser(await syncTimeZone(response.data));
       } else if (response.error) {
         const email = clerkUser.emailAddresses[0]?.emailAddress || '';
         const createResponse = await usersApi.create({
@@ -56,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (createResponse.data) {
-          setUser(createResponse.data);
+          setUser(await syncTimeZone(createResponse.data));
         }
       }
     } catch (error) {

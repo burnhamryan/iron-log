@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
+import { todayIn } from '../../src/lib/dates';
 
 const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -25,7 +26,7 @@ const handler: Handler = async (event: HandlerEvent) => {
     const clerkUserId = authResult.clerkUserId;
 
     // Get user
-    const users = await sql`SELECT id FROM users WHERE clerk_user_id = ${clerkUserId}`;
+    const users = await sql`SELECT id, timezone FROM users WHERE clerk_user_id = ${clerkUserId}`;
     if (users.length === 0) {
       return {
         statusCode: 404,
@@ -69,7 +70,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         };
       }
 
-      const logDate = logged_at || new Date().toISOString().split('T')[0];
+      const logDate = logged_at || todayIn(users[0].timezone);
 
       // Upsert - update if exists for same date
       const [log] = await sql`

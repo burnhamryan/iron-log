@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
+import { isValidTimeZone } from '../../src/lib/dates';
 
 const handler: Handler = async (event: HandlerEvent) => {
   // Handle CORS preflight
@@ -89,6 +90,8 @@ const handler: Handler = async (event: HandlerEvent) => {
     if (event.httpMethod === 'PUT') {
       const body = JSON.parse(event.body || '{}');
       const { first_name, last_name, preferred_unit, protein_goal_grams } = body;
+      // Ignore a bogus zone rather than storing something that breaks every date
+      const timezone = isValidTimeZone(body.timezone) ? body.timezone : null;
 
       const result = await sql`
         UPDATE users
@@ -96,7 +99,8 @@ const handler: Handler = async (event: HandlerEvent) => {
           first_name = COALESCE(${first_name}, first_name),
           last_name = COALESCE(${last_name}, last_name),
           preferred_unit = COALESCE(${preferred_unit}, preferred_unit),
-          protein_goal_grams = COALESCE(${protein_goal_grams ?? null}, protein_goal_grams)
+          protein_goal_grams = COALESCE(${protein_goal_grams ?? null}, protein_goal_grams),
+          timezone = COALESCE(${timezone}, timezone)
         WHERE clerk_user_id = ${clerkUserId}
         RETURNING *
       `;

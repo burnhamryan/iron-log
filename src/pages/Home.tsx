@@ -4,6 +4,7 @@ import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
 import { userProgramsApi, bodyWeightApi, workoutLogsApi } from '../lib/api';
 import { ProteinCard } from '../components/protein/ProteinCard';
+import { formatDateOnly } from '../lib/dates';
 import type { UserProgram, WorkoutLogSummary } from '../types';
 
 interface UserProgramWithDetails extends UserProgram {
@@ -145,7 +146,7 @@ export function Home() {
               </span>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Started {new Date(activeProgram.started_at).toLocaleDateString()}
+              Started {formatDateOnly(activeProgram.started_at)}
             </p>
             <Link
               to={`/programs/${activeProgram.program_id}`}
@@ -202,7 +203,7 @@ export function Home() {
                   </p>
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {new Date(`${workout.workout_date}T00:00:00`).toLocaleDateString()}
+                  {formatDateOnly(workout.workout_date)}
                 </span>
               </Link>
             ))}

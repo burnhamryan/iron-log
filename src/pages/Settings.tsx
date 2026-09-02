@@ -3,6 +3,7 @@ import { useAuthContext } from '../contexts/AuthContext';
 import { useUserContext } from '../contexts/UserContext';
 import { usersApi, workoutLogsApi, bodyWeightApi } from '../lib/api';
 import { DEFAULT_PROTEIN_GOAL } from '../lib/protein';
+import { browserTimeZone } from '../lib/dates';
 
 export function Settings() {
   const { user, refreshUser } = useAuthContext();
@@ -118,6 +119,17 @@ export function Settings() {
               Email
             </label>
             <p className="text-slate-800 dark:text-slate-100">{user?.email || '-'}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">
+              Time zone
+            </label>
+            <p className="text-slate-800 dark:text-slate-100">
+              {user?.timezone || browserTimeZone()}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Detected from this device. Days start and end here, not in UTC.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">
