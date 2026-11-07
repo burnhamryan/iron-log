@@ -1,3 +1,4 @@
+import { parseRir } from '../../src/lib/rir';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { getDb, initDb, headers } from './db';
 import { authenticateRequest } from './auth';
@@ -10,6 +11,7 @@ interface ParsedExercise {
   repRangeMin: number;
   repRangeMax: number;
   rir: number | null;
+  rirMax: number | null;
   restSeconds: number;
   notes: string | null;
   substitutions: string[];
@@ -176,7 +178,8 @@ function parseCsvProgram(workbook: XLSX.WorkBook, programName?: string): ParsedP
     const sets = Number(row['sets']) || 2;
     const repLowRaw = String(row['rep_low'] || '');
     const repHighRaw = String(row['rep_high'] || '');
-    const rirRaw = String(row['rir'] || '').trim();
+    const rirCell = row['rir'];
+    const rirRaw = String(rirCell ?? '').trim();
     const rest = String(row['rest'] || '');
     const lastSetTechnique = String(row['last_set_technique'] || '').trim();
     const cue = String(row['cue'] || '').trim();
@@ -186,13 +189,7 @@ function parseCsvProgram(workbook: XLSX.WorkBook, programName?: string): ParsedP
     const repLow = repLowRaw.toLowerCase() === 'max' ? 1 : (parseInt(repLowRaw) || 8);
     const repHigh = repHighRaw.toLowerCase() === 'max' ? 1 : (parseInt(repHighRaw) || 12);
 
-    let rir: number | null = null;
-    if (rirRaw) {
-      const rirParts = rirRaw.split('/').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-      if (rirParts.length > 0) {
-        rir = rirParts[0];
-      }
-    }
+    const { rir, rirMax } = parseRir(rirCell);
 
     let restSeconds = 120;
     const restMatch = rest.match(/(\d+)/);
@@ -238,6 +235,7 @@ function parseCsvProgram(workbook: XLSX.WorkBook, programName?: string): ParsedP
       repRangeMin: repLow,
       repRangeMax: repHigh,
       rir,
+      rirMax,
       restSeconds,
       notes,
       substitutions: [],
@@ -431,11 +429,7 @@ function addExerciseToWorkout(
     }
   }
 
-  let rir: number | null = null;
-  const rirCol = row[11];
-  if (typeof rirCol === 'number' && rirCol >= 0 && rirCol <= 4) {
-    rir = rirCol;
-  }
+  const { rir, rirMax } = parseRir(row[11]);
 
   let restSeconds = 120;
   const restCell = String(row[13] || '');
@@ -459,6 +453,7 @@ function addExerciseToWorkout(
     repRangeMin: repMin,
     repRangeMax: repMax,
     rir,
+    rirMax,
     restSeconds,
     notes: row[16] ? String(row[16]).trim() : null,
     substitutions,
@@ -771,6 +766,7 @@ const handler: Handler = async (event: HandlerEvent) => {
       rep_range_min: number;
       rep_range_max: number;
       rir: number | null;
+      rir_max: number | null;
       rest_seconds: number;
       notes: string | null;
     }[] = [];
@@ -799,6 +795,7 @@ const handler: Handler = async (event: HandlerEvent) => {
                 rep_range_min: parsedExercise.repRangeMin,
                 rep_range_max: parsedExercise.repRangeMax,
                 rir: parsedExercise.rir,
+                rir_max: parsedExercise.rirMax,
                 rest_seconds: parsedExercise.restSeconds,
                 notes: parsedExercise.notes,
               });
@@ -825,7 +822,7 @@ const handler: Handler = async (event: HandlerEvent) => {
         INSERT INTO template_exercises (
           workout_template_id, exercise_id, exercise_order,
           warmup_sets, working_sets, rep_range_min, rep_range_max,
-          rir, rest_seconds, notes
+          rir, rir_max, rest_seconds, notes
         )
         SELECT * FROM UNNEST(
           ${templateExerciseInserts.map(e => e.workout_template_id)}::uuid[],
@@ -836,9 +833,10 @@ const handler: Handler = async (event: HandlerEvent) => {
           ${templateExerciseInserts.map(e => e.rep_range_min)}::int[],
           ${templateExerciseInserts.map(e => e.rep_range_max)}::int[],
           ${templateExerciseInserts.map(e => e.rir)}::int[],
+          ${templateExerciseInserts.map(e => e.rir_max)}::int[],
           ${templateExerciseInserts.map(e => e.rest_seconds)}::int[],
           ${templateExerciseInserts.map(e => e.notes)}::text[]
-        ) AS t(workout_template_id, exercise_id, exercise_order, warmup_sets, working_sets, rep_range_min, rep_range_max, rir, rest_seconds, notes)
+        ) AS t(workout_template_id, exercise_id, exercise_order, warmup_sets, working_sets, rep_range_min, rep_range_max, rir, rir_max, rest_seconds, notes)
       `;
     }
 

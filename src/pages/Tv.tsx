@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { userProgramsApi, programsApi, workoutLogsApi, exerciseHistoryApi } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
+import { formatRir } from '../lib/rir';
 import { lastWeightIn, formatLastSet, formatLastDate, workingSetsOf } from '../lib/lastPerformance';
 import type {
   UserProgram,
@@ -257,7 +258,7 @@ function ActiveWorkout({ log, template, history, weightUnit, now }: ActiveProps)
 
         <div className="flex gap-12 mt-10 text-4xl">
           <Stat label="Sets" value={`${current.working_sets} × ${reps}`} />
-          {current.rir !== null && <Stat label="RIR" value={String(current.rir)} />}
+          {current.rir !== null && <Stat label="RIR" value={formatRir(current.rir, current.rir_max)} />}
           <Stat label="Rest" value={formatRest(current.rest_seconds)} />
         </div>
 
