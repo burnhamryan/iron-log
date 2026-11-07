@@ -9,6 +9,7 @@ import {
   exerciseHistoryApi,
 } from '../lib/api';
 import { useUserContext } from '../contexts/UserContext';
+import { formatRir } from '../lib/rir';
 import { localToday } from '../lib/dates';
 import { useRestTimer } from '../contexts/restTimerContext';
 import { type WeightUnit } from '../lib/units';
@@ -511,7 +512,7 @@ export function Workout() {
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         {templateExercise.working_sets}x {templateExercise.rep_range_min}-{templateExercise.rep_range_max}
-                        {templateExercise.rir !== null && ` @ RIR ${templateExercise.rir}`}
+                        {templateExercise.rir !== null && ` @ RIR ${formatRir(templateExercise.rir, templateExercise.rir_max)}`}
                         {templateExercise.rest_seconds > 0 && ` | ${Math.round(templateExercise.rest_seconds / 60)}min rest`}
                       </p>
                       {previousSets.length > 0 && history && (

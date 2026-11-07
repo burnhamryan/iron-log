@@ -86,6 +86,7 @@ export interface TemplateExercise {
   rep_range_min: number;
   rep_range_max: number;
   rir: number | null;
+  rir_max?: number | null;
   rest_seconds: number;
   notes: string | null;
 }

@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { programsApi, userProgramsApi } from '../lib/api';
 import type { ProgramWithBlocks } from '../types';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { formatRir } from '../lib/rir';
 
 export function ProgramDetail() {
   const { id } = useParams<{ id: string }>();
@@ -294,7 +295,7 @@ export function ProgramDetail() {
                                       <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap ml-3">
                                         {templateExercise.working_sets} x {templateExercise.rep_range_min}-
                                         {templateExercise.rep_range_max}
-                                        {templateExercise.rir !== null && ` @ ${templateExercise.rir} RIR`}
+                                        {templateExercise.rir !== null && ` @ ${formatRir(templateExercise.rir, templateExercise.rir_max)} RIR`}
                                       </span>
                                     </div>
                                     {templateExercise.notes && (
