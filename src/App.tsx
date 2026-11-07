@@ -13,6 +13,7 @@ import { Progress } from './pages/Progress';
 import { Protein } from './pages/Protein';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
+import { Tv } from './pages/Tv';
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -28,6 +29,15 @@ function App() {
           <RestTimerProvider>
             <BrowserRouter>
               <Routes>
+                {/* Full-screen TV view, outside the app chrome */}
+                <Route
+                  path="/tv"
+                  element={
+                    <ProtectedRoute>
+                      <Tv />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   element={
                     <ProtectedRoute>
